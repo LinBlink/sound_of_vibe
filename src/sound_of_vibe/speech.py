@@ -8,6 +8,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from .models import Narration
+from .voice_assignment import voice_profiles
 
 DEFAULT_VOICES = {"zh": "zh-CN-YunyangNeural", "en": "en-US-EricNeural"}
 SILENT_ACTIONS = {"working", "tool_wait"}
@@ -30,8 +31,8 @@ class EdgeSpeech:
         self.initialize_audio()
         self.edge = edge_tts
         voices = await asyncio.wait_for(edge_tts.list_voices(), timeout=self.timeout)
-        self.catalog = voices
-        names = {voice["ShortName"] for voice in voices}
+        self.catalog = voice_profiles(voices)
+        names = {voice["ShortName"] for voice in self.catalog}
         missing = set(self.voices.values()) - names
         if missing:
             raise ValueError("Unavailable Edge TTS voice: " + ", ".join(sorted(missing)))
@@ -66,10 +67,12 @@ class EdgeSpeech:
         path = Path(filename)
         try:
             voice = self.voice_for(narration)
+            profile = next((v for v in self.catalog if v["ShortName"] == voice), {})
+            provider_voice = profile.get("BaseVoice", voice)
             for attempt in range(2):
                 try:
                     communicate = self.edge.Communicate(narration.text,
-                                                       voice, rate=self.rate)
+                                                       provider_voice, rate=self.rate)
                     await asyncio.wait_for(communicate.save(str(path)), timeout=self.timeout)
                     break
                 except asyncio.CancelledError:
@@ -79,8 +82,8 @@ class EdgeSpeech:
                         raise
             if self.robotic:
                 from .robotic import mechanical_audio
-                gender = next((v["Gender"] for v in self.catalog if v["ShortName"] == voice), "Female")
-                audio = await asyncio.to_thread(mechanical_audio, path.read_bytes(), gender)
+                gender = profile.get("Gender", "Female")
+                audio = await asyncio.to_thread(mechanical_audio, path.read_bytes(), gender, profile.get("PitchHz"))
                 path.write_bytes(audio)
             # New progress can arrive while the network request is running.
             if stale():

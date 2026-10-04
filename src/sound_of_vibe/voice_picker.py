@@ -12,13 +12,13 @@ from pathlib import Path
 
 from .hook_config import atomic_write
 from .kimi_hooks import load_settings, state_directory
-from .voice_assignment import calm_voices
+from .voice_assignment import voice_profiles
 
 
 async def catalog():
     import edge_tts
     voices = await asyncio.wait_for(edge_tts.list_voices(), 15)
-    return calm_voices([v for v in voices if v["Locale"].startswith(("zh-", "en-"))])
+    return voice_profiles([v for v in voices if v["Locale"].startswith(("zh-", "en-"))])
 
 
 def validate(data, voices):
@@ -57,13 +57,13 @@ async def preview(voice, rate, voices):
     text = "文件修改已完成。测试全部通过。接下来检查执行结果。" if entry["Locale"].startswith("zh-") else "The file update is complete. All tests passed. Next, I will check the results."
     async def synthesize():
         audio = bytearray()
-        async for chunk in edge_tts.Communicate(text, voice, rate=rate).stream():
+        async for chunk in edge_tts.Communicate(text, entry.get("BaseVoice", voice), rate=rate).stream():
             if chunk["type"] == "audio":
                 audio.extend(chunk["data"])
                 if len(audio) > 4 * 1024 * 1024:
                     raise ValueError("Preview audio too large")
         from .robotic import mechanical_audio
-        return await asyncio.to_thread(mechanical_audio, bytes(audio), entry["Gender"])
+        return await asyncio.to_thread(mechanical_audio, bytes(audio), entry["Gender"], entry.get("PitchHz"))
     return await asyncio.wait_for(synthesize(), 25)
 
 

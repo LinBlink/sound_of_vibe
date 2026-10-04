@@ -16,7 +16,7 @@ from sound_of_vibe.kimi_hooks import HookNarrator
 from sound_of_vibe.models import Narration
 from sound_of_vibe.rules import asks_user, classify_tool
 from sound_of_vibe.speech import EdgeSpeech, Speaker
-from sound_of_vibe.voice_assignment import VoiceAssignments
+from sound_of_vibe.voice_assignment import VoiceAssignments, voice_profiles
 from sound_of_vibe.voice_picker import create_server, save_settings
 
 
@@ -26,6 +26,20 @@ PREFERRED = {"zh": "zh-0", "en": "en-0"}
 
 
 class VoiceFeatureTests(unittest.TestCase):
+    def test_chinese_profiles_include_all_tags_and_are_idempotent(self):
+        voice = {'ShortName': 'zh-CN-YunjianNeural', 'Locale': 'zh-CN', 'Gender': 'Male',
+                 'VoiceTag': {'VoicePersonalities': ['Passion']}}
+        profiles = voice_profiles([voice])
+        self.assertEqual(len(profiles), 3)
+        self.assertEqual({v['PitchHz'] for v in profiles}, {100, 120, 150})
+        self.assertEqual({v['BaseVoice'] for v in profiles}, {'zh-CN-YunjianNeural'})
+        self.assertEqual(voice_profiles(profiles), profiles)
+        with tempfile.TemporaryDirectory() as root:
+            registry = VoiceAssignments(Path(root))
+            catalog = profiles + [v for v in CATALOG if v['Locale'].startswith('en-')]
+            pairs = [registry.choose(str(n), {'zh': voice['ShortName'], 'en': 'en-0'}, catalog) for n in range(3)]
+            self.assertEqual(len({v['zh'] for v in pairs}), 3)
+
     def test_mechanical_resynthesis_flattens_pitch_and_preserves_duration(self):
         import numpy as np
         import parselmouth
@@ -46,6 +60,10 @@ class VoiceFeatureTests(unittest.TestCase):
         self.assertGreater(len(voiced), 20)
         self.assertLess(np.std(voiced), 5)
         self.assertAlmostEqual(float(np.median(voiced)), 120, delta=5)
+        high = mechanical_audio(source.getvalue(), 'Male', 150)
+        data, _ = sf.read(BytesIO(high))
+        f0 = parselmouth.Sound(data, sampling_frequency=rate).to_pitch(pitch_floor=60, pitch_ceiling=500).selected_array['frequency']
+        self.assertAlmostEqual(float(np.median(f0[f0 > 0][5:-5])), 150, delta=5)
 
     def test_concurrent_workers_unique_stable_bilingual_and_recovery(self):
         with tempfile.TemporaryDirectory() as root:
@@ -124,6 +142,22 @@ class VoiceFeatureTests(unittest.TestCase):
 
 
 class VoiceAudioTests(unittest.IsolatedAsyncioTestCase):
+    async def test_profile_uses_real_provider_voice_and_selected_mechanical_pitch(self):
+        voice = {'ShortName': 'zh-CN-YunjianNeural', 'Locale': 'zh-CN', 'Gender': 'Male'}
+        backend = EdgeSpeech({'zh': voice['ShortName'] + '::high'})
+        backend.catalog = voice_profiles([voice])
+        async def save(path):
+            Path(path).write_bytes(b'fake provider mp3')
+        communicate = Mock(return_value=SimpleNamespace(save=save))
+        backend.edge = SimpleNamespace(Communicate=communicate)
+        music = Mock()
+        music.get_busy.return_value = False
+        backend.mixer = SimpleNamespace(music=music)
+        with patch('sound_of_vibe.robotic.mechanical_audio', return_value=b'RIFFmock') as transform:
+            await backend.speak(Narration('测试完成。', 'zh', 'commentary'), lambda: False)
+        communicate.assert_called_once_with('测试完成。', 'zh-CN-YunjianNeural', rate='+0%')
+        transform.assert_called_once_with(b'fake provider mp3', 'Male', 150)
+
     async def test_stop_before_task_complete_uses_question_chime_once(self):
         output = []
         speaker = Speaker(None, output.append, self.fail, continuous=True)

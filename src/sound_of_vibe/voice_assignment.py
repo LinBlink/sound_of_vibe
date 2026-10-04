@@ -9,7 +9,29 @@ from pathlib import Path
 def calm_voices(catalog):
     expressive = {"Passion", "Lively", "Cute", "Humorous", "Expressive", "Cheerful", "Sunshine", "Bright"}
     return [voice for voice in catalog
-            if not expressive.intersection(voice.get("VoiceTag", {}).get("VoicePersonalities", []))]
+            if voice["Locale"].startswith("zh-")
+            or not expressive.intersection(voice.get("VoiceTag", {}).get("VoicePersonalities", []))]
+
+
+def voice_profiles(catalog):
+    """Keep provider IDs intact; name local pitch variants explicitly."""
+    result = []
+    for voice in calm_voices(catalog):
+        if "BaseVoice" in voice:
+            result.append(voice)
+            continue
+        male = voice.get("Gender") == "Male"
+        pitches = (100, 120, 150) if male else (160, 190, 220)
+        base = voice["ShortName"]
+        variants = (("", "标准 / Standard", pitches[1]),)
+        if voice["Locale"].startswith("zh-"):
+            variants = (("", "标准 / Standard", pitches[1]),
+                        ("::low", "低音 / Low", pitches[0]),
+                        ("::high", "高音 / High", pitches[2]))
+        for suffix, label, pitch in variants:
+            result.append({**voice, "ShortName": base + suffix, "BaseVoice": base,
+                           "PitchHz": pitch, "DisplayName": f"{base} · {label} ({pitch} Hz)"})
+    return result
 
 
 class VoiceAssignments:
@@ -21,7 +43,9 @@ class VoiceAssignments:
 
     def choose(self, session: str, preferred: dict, catalog: list, now=None) -> dict:
         now = time.time() if now is None else now
-        pools = {language: sorted({v["ShortName"] for v in calm_voices(catalog)
+        profiles = voice_profiles(catalog)
+        by_name = {v["ShortName"]: v for v in profiles}
+        pools = {language: sorted({v["ShortName"] for v in profiles
                                   if v["Locale"].startswith(language + "-")})
                  for language in ("zh", "en")}
         with closing(sqlite3.connect(self.path, timeout=5)) as db, db:
@@ -36,9 +60,10 @@ class VoiceAssignments:
             result = {}
             for index, language in enumerate(("zh", "en"), 1):
                 used = {row[index] for row in rows if row[0] != session}
-                preferred_locale = "zh-CN-" if language == "zh" else "en-US-"
+                preferred_locale = "zh-CN" if language == "zh" else "en-US"
                 candidates = sorted(pools[language], key=lambda name: (name != preferred.get(language),
-                                                                      not name.startswith(preferred_locale), name))
+                                                                      by_name[name]["Locale"] != preferred_locale,
+                                                                      "::" in name, name))
                 result[language] = next((name for name in candidates if name not in used), None)
                 if result[language] is None:
                     raise ValueError("No distinct " + language + " voice available; close an unused session")

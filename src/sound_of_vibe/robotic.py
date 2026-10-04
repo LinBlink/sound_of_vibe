@@ -6,14 +6,14 @@ from threading import Lock
 _PRAAT_LOCK = Lock()
 
 
-def mechanical_audio(audio: bytes, gender: str = "Female") -> bytes:
+def mechanical_audio(audio: bytes, gender: str = "Female", pitch_hz: float | None = None) -> bytes:
     # Praat's command dispatcher is shared within this process. Concurrent
     # preview requests must not interleave its object selection state.
     with _PRAAT_LOCK:
-        return _render(audio, gender)
+        return _render(audio, gender, pitch_hz)
 
 
-def _render(audio: bytes, gender: str) -> bytes:
+def _render(audio: bytes, gender: str, pitch_hz: float | None) -> bytes:
     import numpy as np
     import parselmouth
     import soundfile as sf
@@ -26,7 +26,9 @@ def _render(audio: bytes, gender: str) -> bytes:
     manipulation = call(sound, "To Manipulation", 0.01, 60, 500)
     tier = call(manipulation, "Extract pitch tier")
     call(tier, "Remove points between", sound.xmin, sound.xmax)
-    pitch = 120 if gender == "Male" else 190
+    pitch = pitch_hz if pitch_hz is not None else (120 if gender == "Male" else 190)
+    if not 60 <= pitch <= 500:
+        raise ValueError("Mechanical pitch must be between 60 and 500 Hz")
     call(tier, "Add point", sound.xmin, pitch)
     call(tier, "Add point", sound.xmax, pitch)
     call([tier, manipulation], "Replace pitch tier")
