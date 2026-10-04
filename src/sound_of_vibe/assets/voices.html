@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sound of Vibe · 音色设置 / Voice settings</title>
+<style>
+body{margin:0;background:#f5f6fa;color:#202637;font:16px system-ui,sans-serif}main{max-width:760px;margin:48px auto;padding:32px;background:white;border-radius:20px;box-shadow:0 8px 40px #2026370b}h1{font-size:28px;margin:8px 0}p{line-height:1.7;color:#596173}.brand{color:#6255c7;font-weight:700;font-size:13px;letter-spacing:2px}label{display:block;margin:20px 0 8px;font-weight:600}select,input[type=number]{padding:12px;border:1px solid #ced2dc;border-radius:8px;font:inherit;max-width:100%;box-sizing:border-box}select{width:100%}.row{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:end}button{padding:12px 18px;border:0;border-radius:8px;background:#ebe8fa;color:#493b9c;font:inherit;cursor:pointer}button:disabled{opacity:.5;cursor:wait}.save{background:#6255c7;color:white;margin-top:26px}.check{font-weight:400;line-height:1.6}.small{font-size:13px}audio{display:block;width:100%;margin-top:18px}#status{min-height:26px;margin:16px 0;color:#493b9c}fieldset{border:1px solid #e2e4ed;border-radius:10px;padding:16px;margin-top:24px}@media(max-width:800px){main{margin:20px 12px;padding:22px}.row{grid-template-columns:1fr}button{width:100%}}
+</style>
+<main><div class="brand">SOUND OF VIBE</div><h1>音色设置 <span class="small">Voice settings</span></h1>
+<p>选择中英文音色，先试听，再保存。<br><span class="small">Choose Chinese and English voices, preview, then save.</span></p>
+<label for="source">应用到 / Apply to</label><select id="source"><option value="both">Kimi + Codex</option value="kimi">Kimi</option><option value="codex">Codex</option></select>
+<div class="row"><div><label for="zh">中文音色 / Chinese voice</label><select id="zh"></select></div><button id="preview-zh">试听中文 / Preview</button></div>
+<div class="row"><div><label for="en">英文音色 / English voice</label><select id="en"></select></div><button id="preview-en">试听英文 / Preview</button></div>
+<label for="rate">语速百分比 / Rate (%)</label><input id="rate" type="number" value="0" min="-50" max="100">
+<label class="check"><input id="automatic" type="checkbox" checked> 每个工作会话自动分配不同音色 / Different voices per session</label>
+<p class="small">勾选时，所选音色是新会话的首选；被占用时自动分配其他音色。现有会话保持自己的音色。取消勾选后所有会话使用所选音色。<br>Selected voices are preferred for new sessions. Existing sessions keep their assigned voices.</p>
+<p class="small">使用默认朗读方式，不添加情感风格。Edge TTS 仍有自然语调，不能保证完全机械。等待和心跳提示不播放人声。<br>Default delivery, without emotion styles. Natural intonation remains. Waiting reminders are silent.</p>
+<fieldset><legend>提示音 / Chimes</legend><button id="complete">任务完成 / Task finished</button> <button id="ask">需要回答 / Answer needed</button><p class="small">本地音效：完成与提问使用两种不同的叮咚。Local sounds, two distinct chimes.</p></fieldset>
+<audio id="audio" controls></audio><button class="save" id="save">保存设置 / Save settings</button><div id="status" role="status">正在加载音色 / Loading voices…</div>
+<p class="small">试听通过在线 TTS 合成固定示例；提示音可离线播放。保持此命令运行即可使用设置页，Ctrl+C 关闭服务。<br>Voice previews use online TTS; chimes are offline. Ctrl+C closes the server.</p></main>
+<script>
+const $=id=>document.getElementById(id), token='__TOKEN__';let settings, blob;
+function data(){const n=Number($('rate').value);if(!Number.isFinite(n)||n< -50||n>100)throw Error('语速范围 -50 至 100');return {source:$('source').value,voices:{zh:$('zh').value,en:$('en').value},rate:(n>=0?'+':'')+n+'%',per_session_voice:$('automatic').checked}}
+async function post(path,payload){const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json','X-Voice-Token':token},body:JSON.stringify(payload)});if(!r.ok)throw Error((await r.json()).error);return r}
+async function play(url){$('audio').src=url;try{await $('audio').play()}catch(e){$('status').textContent='请点击播放器播放 / Press play in the audio player'}}
+function fill(){const s=settings[$('source').value==='both'?'kimi':$('source').value];$('zh').value=s.voices.zh;$('en').value=s.voices.en;$('rate').value=parseInt(s.rate);$('automatic').checked=s.per_session_voice!==false}
+for(const lang of ['zh','en'])$('preview-'+lang).onclick=async()=>{const b=$('preview-'+lang);b.disabled=true;$('status').textContent='正在合成 / Synthesizing…';try{const p=data();p.voice=p.voices[lang];const r=await post('/api/preview',p);if(blob)URL.revokeObjectURL(blob);blob=URL.createObjectURL(await r.blob());$('status').textContent='试听 / Preview';await play(blob)}catch(e){$('status').textContent=e.message}finally{b.disabled=false}};
+for(const kind of ['complete','ask'])$(kind).onclick=()=>play('/sounds/'+kind);
+$('save').onclick=async()=>{try{const p=data();await post('/api/save',p);for(const name of p.source==='both'?['kimi','codex']:[p.source])settings[name]=p;$('status').textContent='已保存。下一句使用新设置；已分配会话保留音色。/ Saved. Applies to the next utterance; assigned voices remain stable.'}catch(e){$('status').textContent=e.message}};
+$('source').onchange=fill;
+(async()=>{try{const r=await fetch('/api/settings');if(!r.ok)throw Error('加载失败 / Loading failed');const d=await r.json();settings=d.settings;for(const lang of ['zh','en'])for(const v of d.voices.filter(v=>v.Locale.startsWith(lang+'-'))){const o=document.createElement('option');o.value=v.ShortName;o.textContent=v.ShortName+' · '+v.Locale+' · '+v.Gender;$(lang).append(o)}fill();$('status').textContent='可试听并保存 / Ready to preview and save'}catch(e){$('status').textContent=e.message}})();
+</script></html>

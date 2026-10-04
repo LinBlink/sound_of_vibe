@@ -23,6 +23,8 @@ def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description="Chinese / English progress narration for Codex and Kimi CLI")
     result.add_argument("--version", action="version", version=__version__)
     commands = result.add_subparsers(dest="command", required=True)
+    voices = commands.add_parser("voices", help="Open the local bilingual voice selector with previews")
+    voices.add_argument("--no-browser", action="store_true")
     hooks = commands.add_parser("hooks", help="Enable automatic voice narration for plain kimi or codex")
     actions = hooks.add_subparsers(dest="hook_action", required=True)
     for name in ("install", "disable", "status"):
@@ -101,6 +103,10 @@ def main(argv: list[str] | None = None) -> int:
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", errors="replace")
     try:
+        if args.command == "voices":
+            from .voice_picker import open_picker
+            open_picker(args.no_browser)
+            return 0
         return asyncio.run(execute(args, extra))
     except KeyboardInterrupt:
         print("[sound-of-vibe] Cancelled.", file=sys.stderr)

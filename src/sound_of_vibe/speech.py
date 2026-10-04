@@ -10,6 +10,8 @@ from pathlib import Path
 from .models import Narration
 
 DEFAULT_VOICES = {"zh": "zh-CN-XiaoxiaoNeural", "en": "en-US-AriaNeural"}
+SILENT_ACTIONS = {"working", "tool_wait"}
+CHIME_ACTIONS = {"complete", "ask", "permission"}
 
 
 class EdgeSpeech:
@@ -19,23 +21,43 @@ class EdgeSpeech:
         self.timeout = timeout
         self.mixer = None
         self.edge = None
+        self.catalog = []
 
     async def initialize(self):
         import edge_tts
 
+        self.initialize_audio()
         self.edge = edge_tts
         voices = await asyncio.wait_for(edge_tts.list_voices(), timeout=self.timeout)
+        self.catalog = voices
         names = {voice["ShortName"] for voice in voices}
         missing = set(self.voices.values()) - names
         if missing:
             raise ValueError("Unavailable Edge TTS voice: " + ", ".join(sorted(missing)))
+    def initialize_audio(self):
         os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
         from pygame import mixer
 
         self.mixer = mixer
-        mixer.init()
+        if not mixer.get_init():
+            mixer.init()
+
+    def voice_for(self, narration: Narration) -> str:
+        return self.voices[narration.language]
 
     async def speak(self, narration: Narration, stale: Callable[[], bool]):
+        if narration.action in CHIME_ACTIONS:
+            self.initialize_audio()
+            name = "complete" if narration.action == "complete" else "ask"
+            try:
+                self.mixer.music.load(str(Path(__file__).parent / "assets" / (name + ".ogg")))
+                self.mixer.music.play()
+                while self.mixer.music.get_busy():
+                    await asyncio.sleep(0.05)
+                return True
+            finally:
+                self.mixer.music.stop()
+                self.mixer.music.unload()
         if self.edge is None or self.mixer is None:
             raise RuntimeError("Speech backend has not been initialized")
         descriptor, filename = tempfile.mkstemp(prefix="sound-of-vibe-", suffix=".mp3")
@@ -45,7 +67,7 @@ class EdgeSpeech:
             for attempt in range(2):
                 try:
                     communicate = self.edge.Communicate(narration.text,
-                                                       self.voices[narration.language], rate=self.rate)
+                                                       self.voice_for(narration), rate=self.rate)
                     await asyncio.wait_for(communicate.save(str(path)), timeout=self.timeout)
                     break
                 except asyncio.CancelledError:
@@ -103,18 +125,21 @@ class Speaker:
         self.closed = False
         self.terminal = False
         self.task: asyncio.Task | None = None
+        self.current: Narration | None = None
 
     def submit(self, narration: Narration):
         if self.closed or (self.terminal and not self.continuous):
             return
         self.output(narration)
+        if narration.action in SILENT_ACTIONS:
+            return
         self.terminal = narration.terminal
         if self.prefer_commentary:
             if narration.action == "commentary":
-                if self.pending is not None and not self.pending.terminal and self.pending.action != "commentary":
+                if self.pending is not None and self.pending.session == narration.session and not self.pending.terminal and self.pending.action not in CHIME_ACTIONS | {"commentary"}:
                     self.pending = None
-                self.backlog = deque(item for item in self.backlog if item.terminal or item.action == "commentary")
-            elif not narration.terminal and any(item.action == "commentary" for item in
+                self.backlog = deque(item for item in self.backlog if item.session != narration.session or item.terminal or item.action in CHIME_ACTIONS | {"commentary"})
+            elif narration.action not in CHIME_ACTIONS and not narration.terminal and any(item.action == "commentary" and item.session == narration.session for item in
                                                ([self.pending] if self.pending else []) + list(self.backlog)):
                 return
         if self.preserve_progress and self.pending is None and self.backlog:
@@ -124,7 +149,11 @@ class Speaker:
             # completion must follow progress rather than overwrite all of it.
             if len(self.backlog) >= self.max_pending - 1:
                 if self.backlog:
-                    self.backlog.popleft()
+                    discard = next((item for item in self.backlog if item.action not in CHIME_ACTIONS and not item.terminal), None)
+                    if discard:
+                        self.backlog.remove(discard)
+                    elif narration.action not in CHIME_ACTIONS and not narration.terminal:
+                        return
                 else:
                     self.pending = narration
                     self.generation += 1
@@ -151,14 +180,25 @@ class Speaker:
                 continue
             if self.backend is not None and not initialized:
                 try:
-                    await self.backend.initialize()
-                    initialized = True
+                    if self.pending.action in CHIME_ACTIONS:
+                        if hasattr(self.backend, "initialize_audio"):
+                            self.backend.initialize_audio()
+                        else:
+                            await self.backend.initialize()
+                            initialized = True
+                    else:
+                        await self.backend.initialize()
+                        initialized = True
                 except asyncio.CancelledError:
                     raise
                 except Exception as error:
                     self.diagnostic(f"Audio unavailable; continuing with text ({type(error).__name__}).")
-                    self.backend.close()
-                    self.backend = None
+                    if hasattr(self.backend, "initialize_audio") and self.backend.mixer is not None:
+                        self.backend.edge = None
+                        initialized = True
+                    else:
+                        self.backend.close()
+                        self.backend = None
             if self.backend is not None and not self.pending.terminal:
                 delay = self.interval - (loop.time() - last_started)
                 if delay > 0:
@@ -167,12 +207,15 @@ class Speaker:
             generation = self.generation
             if self.backend is not None:
                 try:
+                    self.current = narration
                     last_started = loop.time()
                     await self.backend.speak(narration, lambda: not self.preserve_progress and generation != self.generation)
                 except asyncio.CancelledError:
                     raise
                 except Exception as error:
                     self.diagnostic(f"Speech failed; continuing with text ({type(error).__name__}).")
+                finally:
+                    self.current = None
             if self.preserve_progress and self.pending is None and self.backlog:
                 self.pending = self.backlog.popleft()
                 self.wake.set()

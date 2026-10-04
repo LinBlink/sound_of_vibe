@@ -18,6 +18,7 @@ TEMPLATES: dict[str, dict[str, str]] = {
     "tool": {"zh": "正在调用工具", "en": "Using a tool"},
     "complete": {"zh": "任务已完成", "en": "Task completed"},
     "failed": {"zh": "任务执行失败", "en": "Task failed"},
+    "ask": {"zh": "需要你的回答", "en": "Your answer is needed"},
 }
 ACTION_WORDS = {
     "test": r"运行(?:单元)?测试|测试|验证|检查结果|\b(?:run(?:ning)?|execut(?:e|ing))\s+(?:the\s+)?tests?\b|\b(?:test\w*|verif\w*|validat\w*)\b",
@@ -83,6 +84,8 @@ def classify_command(command: str) -> Action:
 
 def classify_tool(name: str, arguments: dict) -> Action:
     normalized = re.sub(r"[^a-z]", "", name.lower())
+    if any(normalized.endswith(tool) for tool in ("requestuserinput", "requestuserinputasync", "askuserquestion", "askuser")):
+        return "ask"
     if normalized in {"bash", "shell", "execcommand", "runcommand", "terminal"}:
         return classify_command(str(arguments.get("command", arguments.get("cmd", ""))))
     if normalized in {"read", "readfile", "readfiles", "view", "viewfile"}:
@@ -92,6 +95,13 @@ def classify_tool(name: str, arguments: dict) -> Action:
     if normalized in {"write", "writefile", "edit", "editfile", "strreplace", "strreplacefile", "applypatch"}:
         return "edit"
     return "tool"
+
+
+def asks_user(text: str) -> bool:
+    """A question in visible final prose; exclude fenced code and quoted logs."""
+    prose = re.sub(r"```.*?```|~~~.*?~~~|`[^`]*`", "", text, flags=re.S)
+    return any(line.strip() and not line.lstrip().startswith((">", "- ["))
+               and re.search(r"[?？]\s*$", line) for line in prose.splitlines())
 
 
 def progress_sentences(text: str) -> list[Narration]:
@@ -225,7 +235,7 @@ class Narrator:
             selected.append(sentence)
         if event.terminal:
             self.ended = True
-            action = "failed" if event.action == "failed" else "complete"
+            action = event.action if event.action in {"failed", "ask"} else "complete"
             return [Narration(TEMPLATES[action][self.language], self.language, action, True)]
         if not selected and event.action and event.action != "commentary":
             selected = [Narration(TEMPLATES[event.action][self.language], self.language, event.action)]

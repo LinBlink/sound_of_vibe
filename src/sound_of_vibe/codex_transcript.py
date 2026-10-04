@@ -7,6 +7,7 @@ from pathlib import Path
 from .adapters import as_text
 from .kimi_transcript import WireTail
 from .models import Event
+from .rules import asks_user
 
 
 def codex_home() -> Path:
@@ -23,6 +24,7 @@ class RolloutAdapter:
     def __init__(self):
         self.pending: Event | None = None
         self.sequence = 0
+        self.question = False
 
     def feed(self, record: dict) -> list[Event]:
         self.sequence += 1
@@ -34,9 +36,10 @@ class RolloutAdapter:
         if record.get("type") == "event_msg":
             if kind in {"task_started", "turn_aborted"}:
                 self.pending = None
+                self.question = False
             if kind == "task_complete":
                 self.pending = None
-                return [Event("codex-rollout", identity, "complete", terminal=True)]
+                return [Event("codex-rollout", identity, "ask" if self.question else "complete", terminal=True)]
             return []
         if record.get("type") != "response_item":
             return []
@@ -44,6 +47,7 @@ class RolloutAdapter:
             phase = payload.get("phase")
             if phase == "final_answer":
                 self.pending = None
+                self.question = asks_user(as_text(payload.get("content")))
                 return []
             event = Event("codex-rollout", identity, "commentary", as_text(payload.get("content")))
             if phase == "commentary":

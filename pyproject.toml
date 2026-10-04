@@ -14,3 +14,6 @@ sound-of-vibe = "sound_of_vibe.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+sound_of_vibe = ["assets/*"]

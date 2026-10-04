@@ -165,7 +165,7 @@ class HookAsyncTests(unittest.IsolatedAsyncioTestCase):
         narrator.tick()
         await speaker.close()
         self.assertEqual([n.action for n in output], ["start", "working", "read", "tool_wait",
-                         "permission", "permission", "permission_result", "read_result", "complete"])
+                         "permission", "permission_result", "read_result", "complete"])
         self.assertEqual(narrator.active, {})
 
     async def test_failed_tool_does_not_claim_success_and_interrupt_stops_reminders(self):

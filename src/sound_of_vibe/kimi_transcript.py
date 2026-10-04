@@ -7,6 +7,7 @@ from pathlib import Path
 from .adapters import as_text
 from .models import Event
 from .stream import JsonlDecoder
+from .rules import asks_user
 
 
 def find_wire(session: str) -> Path | None:
@@ -58,7 +59,10 @@ class WireAdapter:
             elif kind == "step.end":
                 if event.get("finishReason") in {"tool_calls", "tool_use"}:
                     return self.flush_parts()
-                self.parts.clear()  # Final text belongs to the final answer.
+                question = asks_user("".join(self.parts))
+                self.parts.clear()  # Never narrate the final answer itself.
+                if question:
+                    return [Event("kimi-wire", self.step_id + ":ask", "ask", terminal=True)]
             return []
         if record.get("type") != "agent.message.appended":
             return []
@@ -77,6 +81,8 @@ class WireAdapter:
         finish = meta.get("finish", {}).get("finishReason")
         if finish in {"completed", "stop", "end_turn"}:
             self.pending = None
+            if asks_user(as_text(message.get("content"))):
+                return [Event("kimi-wire", str(meta.get("messageId")) + ":ask", "ask", terminal=True)]
             return []
         # as_text accepts only text/output_text parts, never think or reasoning.
         text = as_text(message.get("content"))

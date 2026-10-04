@@ -24,6 +24,7 @@ from .kimi_transcript import WireTail, find_wire
 from .codex_transcript import RolloutTail, find_rollout
 from .rules import Narrator, classify_tool, detect_language
 from .speech import DEFAULT_VOICES, EdgeSpeech, Speaker
+from .voice_assignment import VoiceAssignments
 
 HOOK_EVENTS = ("SessionStart", "TurnStarted", "PreToolUse", "PostToolUse", "PostToolUseFailure",
                "PermissionRequest", "PermissionResult", "SessionHeartbeat",
@@ -57,7 +58,7 @@ def state_directory() -> Path:
 
 
 def load_settings(directory: Path) -> dict:
-    defaults = {"enabled": True, "language": "auto", "voices": DEFAULT_VOICES, "rate": "+10%"}
+    defaults = {"enabled": True, "language": "auto", "voices": DEFAULT_VOICES, "rate": "+0%", "per_session_voice": True}
     path = directory / "settings.json"
     if path.exists():
         defaults.update(json.loads(path.read_text(encoding="utf-8")))
@@ -203,6 +204,26 @@ class LoggedSpeech(EdgeSpeech):
     def __init__(self, directory: Path, settings: dict):
         super().__init__(settings["voices"], settings["rate"])
         self.directory = directory
+        self.settings = settings
+        self.assignments = VoiceAssignments(state_directory())
+        self.scope = str(directory.resolve()) + ":"
+        self.assigned = {}
+
+    def voice_for(self, narration):
+        self.settings = load_settings(self.directory)
+        self.voices = self.settings["voices"]
+        self.rate = self.settings["rate"]
+        if not self.settings.get("per_session_voice", True) or not narration.session:
+            return super().voice_for(narration)
+        pair = self.assignments.choose(self.scope + narration.session, self.voices, self.catalog)
+        if self.assigned.get(narration.session) != pair:
+            log(self.directory, f"[assigned] session={narration.session} zh={pair['zh']} en={pair['en']}")
+            self.assigned[narration.session] = pair
+        return pair[narration.language]
+
+    def release_session(self, session):
+        self.assignments.release(self.scope + session)
+        self.assigned.pop(session, None)
 
     async def speak(self, narration, stale):
         played = await super().speak(narration, stale)
@@ -265,7 +286,8 @@ class HookNarrator:
         for session, (due, stage) in list(self.active.items()):
             narrator = self.sessions.get(session)
             if narrator is not None and not narrator.ended and now >= due:
-                self.progress(session, narrator, stage)
+                if stage != "permission":
+                    self.progress(session, narrator, stage)
                 self.active[session] = (now + PROGRESS_SECONDS, stage)
 
     async def feed(self, event: dict):
@@ -322,6 +344,8 @@ class HookNarrator:
                 return
             stage = "permission" if kind == "PermissionRequest" else "working"
             self.active[session] = (self.clock() + PROGRESS_SECONDS, stage)
+            if event.get("action") == "ask":
+                return
             action = {"PostToolUse": event.get("action", "tool") + "_result",
                       "PostToolUseFailure": "tool_failed", "PermissionRequest": "permission",
                       "PermissionResult": "permission_result"}[kind]
@@ -350,6 +374,7 @@ async def worker(directory: Path, token: str, idle_seconds: float = IDLE_SECONDS
     narrator = HookNarrator(speaker, settings["language"])
     last_event = time.monotonic()
     cancel = False
+    ended_sessions = set()
     log(directory, f"Worker started (pid={os.getpid()}).")
     try:
         while True:
@@ -361,6 +386,16 @@ async def worker(directory: Path, token: str, idle_seconds: float = IDLE_SECONDS
                 last_event = time.monotonic()
                 log(directory, f"[hook/{event['kind']}] session={event['session']}")
                 await narrator.feed(event)
+                if event["kind"] == "SessionEnd":
+                    ended_sessions.add(event["session"])
+                elif event["kind"] in {"SessionStart", "TurnStarted"}:
+                    ended_sessions.discard(event["session"])
+            waiting = [speaker.current, speaker.pending, *speaker.backlog]
+            for session in list(ended_sessions):
+                if not any(item and item.session == session for item in waiting):
+                    if backend:
+                        backend.release_session(session)
+                    ended_sessions.remove(session)
             narrator.poll_text()
             narrator.tick()
             limit = settings.get("active_idle_seconds", idle_seconds) if narrator.active else idle_seconds
