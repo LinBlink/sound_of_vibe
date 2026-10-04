@@ -1,0 +1,11 @@
+{"type":"thread.started","thread_id":"demo"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"1","type":"agent_message","text":"我先查看项目文件。"}}
+{"type":"item.started","item":{"id":"2","type":"command_execution","command":"rg --files","status":"in_progress"}}
+{"type":"item.completed","item":{"id":"2","type":"command_execution","command":"rg --files","aggregated_output":"README.md\napp.py","exit_code":0}}
+{"type":"item.completed","item":{"id":"3","type":"reasoning","text":"Do not narrate this reasoning."}}
+{"type":"item.completed","item":{"id":"4","type":"agent_message","text":"I'm running tests."}}
+{"type":"item.started","item":{"id":"5","type":"command_execution","command":"python -m pytest","status":"in_progress"}}
+{"type":"item.completed","item":{"id":"5","type":"command_execution","command":"python -m pytest","aggregated_output":"All passed","exit_code":0}}
+{"type":"item.completed","item":{"id":"6","type":"agent_message","text":"I'll inspect this later. This is the final answer."}}
+{"type":"turn.completed","usage":{"input_tokens":100,"output_tokens":50}}
