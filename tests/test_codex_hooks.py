@@ -3,6 +3,8 @@ import contextlib
 import io
 import json
 import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -22,6 +24,16 @@ def record(text, phase="commentary", role="assistant"):
 
 
 class CodexHookTests(unittest.TestCase):
+    def test_isolated_receiver_ignores_same_named_package_in_project(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "sound_of_vibe").mkdir()
+            (root / "sound_of_vibe/__init__.py").write_text("raise RuntimeError('wrong project import')")
+            result = subprocess.run([sys.executable, "-I", "-m", "sound_of_vibe.codex_hooks", "--help"],
+                                    cwd=root, capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("--state-dir", result.stdout)
+
     def test_normalizer_stores_language_and_action_without_raw_inputs(self):
         event = normalize_hook({"hook_event_name": "UserPromptSubmit", "session_id": "thread1",
                                 "turn_id": "turn1", "prompt": "查看 PRIVATE_SECRET"})

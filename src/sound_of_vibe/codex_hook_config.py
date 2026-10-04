@@ -74,7 +74,7 @@ def install(config: Path | None = None, state: Path | None = None,
         if features.get("hooks", features.get("codex_hooks", True)) is False:
             raise ValueError("Codex features.hooks is disabled in config.toml; enable it before installing")
     updated = remove_owned(read_config(config))
-    command = hook_command(python or Path(sys.executable), state, "sound_of_vibe.codex_hooks")
+    command = hook_command(python or Path(sys.executable), state, "sound_of_vibe.codex_hooks", isolated=True)
     for event in HOOK_EVENTS:
         updated["hooks"].setdefault(event, []).append({"hooks": [{"type": "command", "command": command,
                                                "timeout": 3, "statusMessage": MARKER}]})

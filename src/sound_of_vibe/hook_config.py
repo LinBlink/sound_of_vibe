@@ -42,8 +42,8 @@ def remove_block(content: str) -> str:
     return content[:start] + content[end:]
 
 
-def hook_command(python: Path, state: Path, module: str = "sound_of_vibe.kimi_hooks") -> str:
-    arguments = [str(python.resolve()), "-m", module, "receive",
+def hook_command(python: Path, state: Path, module: str = "sound_of_vibe.kimi_hooks", isolated: bool = False) -> str:
+    arguments = [str(python.resolve()), *(["-I"] if isolated else []), "-m", module, "receive",
                  "--state-dir", str(state.resolve())]
     if os.name == "nt":
         # Hooks use cmd.exe on Windows. Reject cmd expansion characters rather
