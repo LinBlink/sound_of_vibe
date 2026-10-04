@@ -144,6 +144,56 @@ def progress_sentences(text: str) -> list[Narration]:
     return results
 
 
+def commentary_sentences(text: str) -> list[Narration]:
+    """Visible intermediate assistant prose, including findings and test status.
+
+    Callers must establish message provenance/phase; this is not a log parser.
+    Long sentences are split for playback, never silently truncated.
+    """
+    prose = []
+    fence = None
+    for line in ANSI.sub("", text).splitlines():
+        stripped = line.strip()
+        marker = re.match(r"^(`{3,}|~{3,})", stripped)
+        if marker:
+            if fence is None:
+                fence = marker[1][0]
+            elif marker[1][0] == fence:
+                fence = None
+            continue
+        if fence or not stripped or line.startswith(("    ", "\t")):
+            continue
+        if re.match(r'^(?:[+>@$]|---|@@|diff\b|Traceback|File\s+"|\d{4}-\d\d-\d\d|\[(?:INFO|DEBUG|WARN|ERROR)\]|(?:INFO|DEBUG|WARN|ERROR)\b|[•]?\s*(?:Edited|Failed \(exit|Ran )\b)', stripped):
+            continue
+        stripped = re.sub(r"^(?:[-*•]\s+|\d+[.)]\s+|#{1,6}\s+)", "", stripped)
+        stripped = re.sub(r"`[^`]*`", "", stripped)
+        stripped = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", stripped)
+        stripped = re.sub(r"[*_]+", "", stripped)
+        if re.search(r"[{}]|=>|\b(?:def|class|const|function|import)\s+\w+", stripped):
+            continue
+        prose.append(stripped)
+    result = []
+    for sentence in re.split(r"(?<=[。！？!?])\s*|(?<=\.)\s+|\n", "\n".join(prose)):
+        sentence = " ".join(sentence.split())
+        language = detect_language(sentence)
+        if not language:
+            continue
+        if language == "en":
+            words = sentence.split()
+            chunks = [" ".join(words[index:index + 40]) for index in range(0, len(words), 40)]
+        else:
+            chunks = []
+            while len(sentence) > 90:
+                cut = max(sentence.rfind("，", 30, 90), sentence.rfind("；", 30, 90)) + 1
+                cut = cut if cut > 0 else 90
+                chunks.append(sentence[:cut])
+                sentence = sentence[cut:]
+            if sentence:
+                chunks.append(sentence)
+        result.extend(Narration(chunk, language, "commentary") for chunk in chunks)
+    return result
+
+
 class Narrator:
     """Language selection and bounded deduplication; pacing is handled by the player."""
 
@@ -163,7 +213,7 @@ class Narrator:
         self.seen[event.event_id] = None
         if len(self.seen) > 4096:
             self.seen.popitem(last=False)
-        sentences = progress_sentences(event.text)
+        sentences = commentary_sentences(event.text) if event.action == "commentary" else progress_sentences(event.text)
         selected = []
         for sentence in sentences:
             if self.mode != "auto" and sentence.language != self.mode:
@@ -174,13 +224,13 @@ class Narrator:
             self.ended = True
             action = "failed" if event.action == "failed" else "complete"
             return [Narration(TEMPLATES[action][self.language], self.language, action, True)]
-        if not selected and event.action:
+        if not selected and event.action and event.action != "commentary":
             selected = [Narration(TEMPLATES[event.action][self.language], self.language, event.action)]
         now = self.clock()
         self.recent = {key: when for key, when in self.recent.items() if now - when < self.dedup_seconds}
         accepted = []
         for sentence in selected:
-            key = (sentence.action, sentence.language)
+            key = (sentence.text if sentence.action == "commentary" else sentence.action, sentence.language)
             if key not in self.recent:
                 self.recent[key] = now
                 accepted.append(sentence)

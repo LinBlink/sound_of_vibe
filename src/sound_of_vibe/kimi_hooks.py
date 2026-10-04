@@ -20,6 +20,7 @@ from pathlib import Path
 
 from .adapters import as_arguments
 from .models import Event, Narration
+from .kimi_transcript import WireTail, find_wire
 from .rules import Narrator, classify_tool, detect_language
 from .speech import DEFAULT_VOICES, EdgeSpeech, Speaker
 
@@ -179,6 +180,11 @@ def receive(directory: Path, stream=None) -> int:
         event = normalize_hook(payload) if isinstance(payload, dict) else None
         if event is None:
             return 0
+        if event["kind"] in {"SessionStart", "TurnStarted"}:
+            path = find_wire(event["session"])
+            if path is not None:
+                event["wire_path"] = str(path)
+                event["wire_offset"] = path.stat().st_size
         queue = HookQueue(directory)
         queue.publish(event)
         token = queue.reserve()
@@ -213,6 +219,20 @@ class HookNarrator:
         self.current_session: str | None = None
         self.clock = clock
         self.active: dict[str, tuple[float, str]] = {}
+        self.streams: dict[str, WireTail] = {}
+
+    def poll_text(self, session: str | None = None):
+        for identity, tail in list(self.streams.items()):
+            if session is not None and session != identity:
+                continue
+            narrator = self.sessions.get(identity)
+            if narrator is None or narrator.ended:
+                continue
+            for event in tail.poll():
+                for narration in narrator.consume(event):
+                    self.current_session = identity
+                    self.speaker.submit(replace(narration, session=identity))
+                    self.active[identity] = (self.clock() + PROGRESS_SECONDS, "working")
 
     def new_narrator(self, language: str | None = None) -> Narrator:
         narrator = Narrator(language=self.language, clock=self.clock, dedup_seconds=5)
@@ -240,7 +260,9 @@ class HookNarrator:
 
     async def feed(self, event: dict):
         session, kind = event["session"], event["kind"]
+        self.poll_text(session)
         if kind == "SessionEnd":
+            self.streams.pop(session, None)
             self.active.pop(session, None)
             self.sessions.pop(session, None)
             self.turns.pop(session, None)
@@ -269,10 +291,13 @@ class HookNarrator:
         elif narrator is None:
             narrator = self.new_narrator()
             self.sessions[session] = narrator
+        if kind in {"SessionStart", "TurnStarted"} and "wire_path" in event:
+            self.streams[session] = WireTail(Path(event["wire_path"]), event["wire_offset"])
         if len(self.sessions) > 256:
             oldest, _ = self.sessions.popitem(last=False)
             self.turns.pop(oldest, None)
             self.active.pop(oldest, None)
+            self.streams.pop(oldest, None)
         if kind == "PreToolUse":
             self.active[session] = (self.clock() + PROGRESS_SECONDS, "tool_wait")
             source = Event("kimi-hook", event["id"], event["action"])
@@ -305,7 +330,7 @@ async def worker(directory: Path, token: str, idle_seconds: float = IDLE_SECONDS
     speaker = Speaker(backend,
                       lambda item: log(directory, f"[voice/{item.language}] {item.text} session={item.session}"),
                       lambda message: log(directory, message), interval=1, continuous=True,
-                      preserve_progress=True, max_pending=6)
+                      preserve_progress=True, max_pending=6, prefer_commentary=True)
     narrator = HookNarrator(speaker, settings["language"])
     last_event = time.monotonic()
     cancel = False
@@ -320,6 +345,7 @@ async def worker(directory: Path, token: str, idle_seconds: float = IDLE_SECONDS
                 last_event = time.monotonic()
                 log(directory, f"[hook/{event['kind']}] session={event['session']}")
                 await narrator.feed(event)
+            narrator.poll_text()
             narrator.tick()
             if not events and time.monotonic() - last_event > idle_seconds:
                 # Audio is normally already finished before the idle timeout.

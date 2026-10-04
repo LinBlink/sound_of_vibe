@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 Language = Literal["zh", "en"]
-Action = Literal["read", "search", "edit", "test", "command", "tool", "complete", "failed"]
+Action = Literal["read", "search", "edit", "test", "command", "tool", "commentary", "complete", "failed"]
 
 
 @dataclass(frozen=True)

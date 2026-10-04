@@ -33,6 +33,20 @@ def utterance(text, terminal=False):
 
 
 class SpeakerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_commentary_replaces_waiting_templates_and_retains_completion(self):
+        backend = FakeSpeech()
+        speaker = Speaker(backend, lambda _: None, self.fail, interval=0,
+                          continuous=True, preserve_progress=True, prefer_commentary=True)
+        speaker.submit(utterance("starting"))
+        await backend.started.wait()
+        speaker.submit(utterance("generic read"))
+        speaker.submit(Narration("The order was fixed.", "en", "commentary"))
+        speaker.submit(utterance("generic result"))
+        speaker.submit(utterance("complete", True))
+        backend.release.set()
+        await speaker.close()
+        self.assertEqual(backend.spoken, ["starting", "The order was fixed.", "complete"])
+
     async def test_completion_arriving_during_second_playback_keeps_fifo_order(self):
         backend = FakeSpeech()
         reading = asyncio.Event()

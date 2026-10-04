@@ -53,7 +53,7 @@ class KimiAdapter:
                 result.append(self.pending)
                 self.pending = None
             if text:
-                result.append(Event(self.source, event_id + ":text", text=text))
+                result.append(Event(self.source, event_id + ":text", "commentary", text=text))
             for index, call in enumerate(calls):
                 if not isinstance(call, dict):
                     continue
@@ -65,7 +65,7 @@ class KimiAdapter:
         elif text:
             # No phase/final marker in this protocol. Hold prose until later tool
             # activity proves it is progress; discard the last prose message at EOF.
-            self.pending = Event(self.source, event_id + ":text", text=text)
+            self.pending = Event(self.source, event_id + ":text", "commentary", text=text)
         return result
 
 
@@ -100,7 +100,7 @@ class CodexAdapter:
                 self.pending = None
                 return []
             if phase == "commentary":
-                return [event]
+                return [Event(self.source, item_id + ":text", "commentary", text=event.text)]
             self.pending = event
             return []
         actions = {"file_change": "edit", "web_search": "search", "mcp_tool_call": "tool"}

@@ -87,7 +87,7 @@ class Speaker:
     def __init__(self, backend: EdgeSpeech | None,
                  output: Callable[[Narration], None], diagnostic: Callable[[str], None],
                  interval: float = 3, continuous: bool = False, preserve_progress: bool = False,
-                 max_pending: int = 3):
+                 max_pending: int = 3, prefer_commentary: bool = False):
         self.backend = backend
         self.output = output
         self.diagnostic = diagnostic
@@ -95,6 +95,7 @@ class Speaker:
         self.continuous = continuous
         self.preserve_progress = preserve_progress
         self.max_pending = max(1, max_pending)
+        self.prefer_commentary = prefer_commentary
         self.backlog: deque[Narration] = deque()
         self.pending: Narration | None = None
         self.wake = asyncio.Event()
@@ -108,6 +109,14 @@ class Speaker:
             return
         self.output(narration)
         self.terminal = narration.terminal
+        if self.prefer_commentary:
+            if narration.action == "commentary":
+                if self.pending is not None and not self.pending.terminal and self.pending.action != "commentary":
+                    self.pending = None
+                self.backlog = deque(item for item in self.backlog if item.terminal or item.action == "commentary")
+            elif not narration.terminal and any(item.action == "commentary" for item in
+                                               ([self.pending] if self.pending else []) + list(self.backlog)):
+                return
         if self.preserve_progress and self.pending is None and self.backlog:
             self.pending = self.backlog.popleft()
         if self.preserve_progress and self.pending is not None:
