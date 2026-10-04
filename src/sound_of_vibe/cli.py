@@ -10,6 +10,7 @@ from . import __version__
 from .rules import Narrator
 from .runner import build_command, consume_process, expand_windows_shim, replay, resolve_executable
 from .speech import DEFAULT_VOICES, EdgeSpeech, Speaker
+from . import hook_config
 
 
 def rate_value(value: str) -> str:
@@ -22,6 +23,18 @@ def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description="Chinese / English progress narration for Codex and Kimi CLI")
     result.add_argument("--version", action="version", version=__version__)
     commands = result.add_subparsers(dest="command", required=True)
+    hooks = commands.add_parser("hooks", help="Enable automatic voice narration for plain kimi")
+    actions = hooks.add_subparsers(dest="hook_action", required=True)
+    for name in ("install", "disable", "status"):
+        sub = actions.add_parser(name)
+        sub.add_argument("--config", type=Path, help="Alternate Kimi config.toml path")
+        sub.add_argument("--state-dir", type=Path, help="Alternate narration state directory")
+        if name == "install":
+            sub.add_argument("--language", choices=("auto", "zh", "en"), default="auto")
+            sub.add_argument("--voice-zh", default=DEFAULT_VOICES["zh"])
+            sub.add_argument("--voice-en", default=DEFAULT_VOICES["en"])
+            sub.add_argument("--rate", type=rate_value, default="+10%")
+            sub.add_argument("--text-only", action="store_true", help="Log hook narration without audio")
     for name in ("run", "replay"):
         sub = commands.add_parser(name, help="Launch an agent" if name == "run" else "Replay captured JSONL without an agent")
         sub.add_argument("source", choices=("kimi", "codex"))
@@ -41,6 +54,18 @@ def parser() -> argparse.ArgumentParser:
 
 
 async def execute(args, extra: list[str]) -> int:
+    if args.command == "hooks":
+        import json
+        if args.hook_action == "install":
+            result = hook_config.install(args.config, args.state_dir, args.language,
+                                         {"zh": args.voice_zh, "en": args.voice_en}, args.rate,
+                                         text_only=args.text_only)
+        elif args.hook_action == "disable":
+            result = hook_config.disable(args.config, args.state_dir)
+        else:
+            result = hook_config.status(args.config, args.state_dir)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
     command = None
     if args.command == "run":
         if not args.cwd.is_dir():
