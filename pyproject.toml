@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sound-of-vibe"
+version = "0.1.0"
+description = "Chinese and English progress narration for Codex and Kimi CLI"
+requires-python = ">=3.11"
+dependencies = ["edge-tts>=7.2,<8", "pygame>=2.6,<3"]
+
+[project.scripts]
+sound-of-vibe = "sound_of_vibe.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
