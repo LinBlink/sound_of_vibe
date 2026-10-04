@@ -24,6 +24,27 @@ class CommandTests(unittest.TestCase):
 
 
 class ProcessTests(unittest.IsolatedAsyncioTestCase):
+    def assert_process_exited(self, pid):
+        if os.name == "nt":
+            import ctypes
+            from ctypes import wintypes
+            kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+            kernel.OpenProcess.restype = wintypes.HANDLE
+            kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+            kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+            handle = kernel.OpenProcess(0x100000, False, pid)
+            if handle:
+                try:
+                    self.assertEqual(kernel.WaitForSingleObject(handle, 0), 0)
+                finally:
+                    kernel.CloseHandle(handle)
+            else:
+                self.assertEqual(ctypes.get_last_error(), 87)
+        else:
+            with self.assertRaises(ProcessLookupError):
+                os.kill(pid, 0)
+
     async def run_fake(self, code, source="kimi", prompt="检查项目"):
         output, errors, narration, diagnostics = io.StringIO(), io.StringIO(), [], []
         speaker = Speaker(None, narration.append, diagnostics.append)
@@ -78,26 +99,41 @@ class ProcessTests(unittest.IsolatedAsyncioTestCase):
         task.cancel()
         with self.assertRaises(asyncio.CancelledError):
             await asyncio.wait_for(task, timeout=5)
-        if os.name == "nt":
-            import ctypes
-            from ctypes import wintypes
-            kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-            kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-            kernel.OpenProcess.restype = wintypes.HANDLE
-            kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
-            kernel.CloseHandle.argtypes = [wintypes.HANDLE]
-            handle = kernel.OpenProcess(0x100000, False, pid)  # SYNCHRONIZE
-            if handle:
-                try:
-                    self.assertEqual(kernel.WaitForSingleObject(handle, 0), 0)
-                finally:
-                    kernel.CloseHandle(handle)
-            else:
-                self.assertEqual(ctypes.get_last_error(), 87)  # Already gone, not access denied.
-        else:
-            with self.assertRaises(ProcessLookupError):
-                os.kill(pid, 0)
+        self.assert_process_exited(pid)
         self.assertTrue(speaker.closed)
+
+    @unittest.skipUnless(os.name == "nt", "Windows job process-tree integration")
+    async def test_cancel_reaps_descendant(self):
+        output = io.StringIO()
+        speaker = Speaker(None, lambda _: None, self.fail)
+        code = ("import subprocess,sys,time,json,os\n"
+                "child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)'],"
+                "stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)\n"
+                "print(json.dumps({'pid':os.getpid(),'child':child.pid}),flush=True)\n"
+                "time.sleep(60)")
+        task = asyncio.create_task(consume_process([sys.executable, "-c", code], "kimi", "", Narrator(), speaker,
+                                                   stdout=output, stderr=io.StringIO()))
+        for _ in range(100):
+            if output.getvalue():
+                break
+            await asyncio.sleep(0.02)
+        self.assertTrue(output.getvalue())
+        pids = json.loads(output.getvalue())
+        task.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=5)
+        self.assert_process_exited(pids["pid"])
+        self.assert_process_exited(pids["child"])
+
+    @unittest.skipUnless(os.name == "nt", "Windows job process-tree integration")
+    async def test_normal_exit_closes_inherited_descendant_pipes(self):
+        code = ("import subprocess,sys,json\n"
+                "child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)'])\n"
+                "print(json.dumps({'child':child.pid}),flush=True)")
+        result, output, _, spoken, _ = await self.run_fake(code, prompt="Inspect files")
+        self.assertEqual(result, 0)
+        self.assert_process_exited(json.loads(output)["child"])
+        self.assertEqual(spoken[-1].text, "Task completed")
 
 
 if __name__ == "__main__":

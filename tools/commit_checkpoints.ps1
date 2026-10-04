@@ -4,7 +4,7 @@ $ErrorActionPreference = 'Stop'
 $projectRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 Push-Location -LiteralPath $projectRoot
 try {
-    $head = & git rev-parse --verify HEAD 2>$null
+    $head = & git rev-parse --verify --quiet HEAD
     if ($LASTEXITCODE -eq 0) {
         throw 'This recovery script expects the original repository with no commits. Existing history was found.'
     }

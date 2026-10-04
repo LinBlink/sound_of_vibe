@@ -53,17 +53,19 @@ def expand_windows_shim(command: list[str], source: str) -> list[str]:
     return command
 
 
-async def stop_process(process: asyncio.subprocess.Process):
+async def stop_process(process: asyncio.subprocess.Process, job=None):
     """Terminate the owned process tree, never unrelated agent sessions."""
+    if job is not None:
+        job.close()
     if process.returncode is not None:
         return
-    if os.name == "nt":
+    if os.name == "nt" and job is None:
         killer = await asyncio.create_subprocess_exec(
             "taskkill", "/PID", str(process.pid), "/T", "/F",
             stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
         )
         await killer.wait()
-    else:
+    elif os.name != "nt":
         try:
             os.killpg(process.pid, signal.SIGTERM)
         except ProcessLookupError:
@@ -88,10 +90,26 @@ async def consume_process(command: list[str], source: str, prompt: str,
     stderr = stderr if stderr is not None else sys.stderr
     diagnostic = diagnostic or (lambda message: print(message, file=stderr, flush=True))
     options = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt" else {"start_new_session": True}
-    process = await asyncio.create_subprocess_exec(
-        *command, cwd=cwd, stdin=asyncio.subprocess.PIPE if source == "codex" else asyncio.subprocess.DEVNULL,
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, **options,
-    )
+    job = None
+    if os.name == "nt":
+        from .windows_job import WindowsJob
+        job = WindowsJob()
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *command, cwd=cwd, stdin=asyncio.subprocess.PIPE if source == "codex" else asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, **options,
+        )
+    except BaseException:
+        if job:
+            job.close()
+        raise
+    try:
+        if job:
+            job.attach(process.pid)
+    except OSError:
+        await stop_process(process)
+        job.close()
+        raise
     adapter = adapter_for(source)
     decoder = JsonlDecoder()
 
@@ -129,11 +147,21 @@ async def consume_process(command: list[str], source: str, prompt: str,
             finally:
                 process.stdin.close()
 
+    async def wait_for_exit():
+        # A descendant can inherit stdout/stderr after the agent exits. Closing
+        # the job promptly lets readers reach EOF instead of waiting on a daemon.
+        while process.returncode is None:
+            await asyncio.sleep(0.02)
+        if job:
+            job.close()
+        return await process.wait()
+
     readers = [asyncio.create_task(read_output()), asyncio.create_task(read_logs()),
                asyncio.create_task(write_prompt())]
+    exit_task = asyncio.create_task(wait_for_exit())
     try:
-        await asyncio.gather(*readers)
-        returncode = await process.wait()
+        results = await asyncio.gather(*readers, exit_task)
+        returncode = results[-1]
         if decoder.invalid:
             diagnostic(f"Skipped {decoder.invalid} malformed/oversized JSONL line(s).")
         failed = returncode != 0 or getattr(adapter, "failed", False)
@@ -143,12 +171,15 @@ async def consume_process(command: list[str], source: str, prompt: str,
         return returncode
     except BaseException:
         # Reader exceptions and Ctrl+C both need to reap the child and stop audio.
-        await stop_process(process)
-        for reader in readers:
+        await stop_process(process, job)
+        for reader in [*readers, exit_task]:
             reader.cancel()
-        await asyncio.gather(*readers, return_exceptions=True)
+        await asyncio.gather(*readers, exit_task, return_exceptions=True)
         await speaker.close(cancel=True)
         raise
+    finally:
+        if job:
+            job.close()
 
 
 async def replay(path: Path, source: str, narrator: Narrator, speaker: Speaker,
