@@ -53,12 +53,17 @@ def classify_command(command: str) -> Action:
         return "command"
     if not parts:
         return "command"
-    if parts[0].lower() in {"bash", "sh", "zsh"} and len(parts) >= 3 and parts[1] in {"-c", "-lc"}:
-        return classify_command(parts[2])
-    if any(token in {";", "|", "||", "&&", "&"} or ";" in token for token in parts):
-        return "command"
     executable = parts[0].replace("\\", "/").rsplit("/", 1)[-1].lower()
     executable = re.sub(r"\.(?:exe|cmd|bat)$", "", executable)
+    if executable in {"bash", "sh", "zsh"} and len(parts) == 3 and parts[1] in {"-c", "-lc"}:
+        return classify_command(parts[2])
+    if executable in {"pwsh", "powershell"}:
+        command_index = next((index for index, part in enumerate(parts) if part.lower() in {"-command", "-c"}), None)
+        if command_index is not None and command_index == len(parts) - 2:
+            return classify_command(parts[-1])
+        return "command"
+    if any(token in {";", "|", "||", "&&", "&"} or ";" in token for token in parts):
+        return "command"
     if executable in {"pytest", "jest", "vitest"}:
         return "test"
     if executable in {"python", "python3", "py"} and parts[1:3] == ["-m", "pytest"]:

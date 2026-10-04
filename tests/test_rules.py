@@ -45,6 +45,14 @@ The project has three files.
         result = progress_sentences("I'll inspect test.py.\nI'll review the tests.\n我先检查测试文件。\nI'm running tests.")
         self.assertEqual([item.action for item in result], ["read", "read", "read", "test"])
 
+    def test_powershell_and_absolute_shell_wrappers(self):
+        self.assertEqual(classify_command('"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command \'Get-Content -LiteralPath README.md\''), "read")
+        self.assertEqual(classify_command('powershell.exe -NoProfile -Command "rg TODO"'), "search")
+        self.assertEqual(classify_command('pwsh -Command "Get-Content README.md; Remove-Item README.md"'), "command")
+        self.assertEqual(classify_command('pwsh -EncodedCommand abc'), "command")
+        self.assertEqual(classify_command('/bin/bash -lc "python -m pytest"'), "test")
+        self.assertEqual(classify_command('bash -lc "pytest" extra'), "command")
+
     def test_language_switch_dedup_and_terminal(self):
         now = [0.0]
         narrator = Narrator("检查项目", clock=lambda: now[0])
