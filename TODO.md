@@ -17,6 +17,6 @@ Edge TTS 中文 / English 旁白
 - [x] Edge TTS 异步合成、播放、超时重试和清理
 - [x] CLI 包装器、无模型回放、使用文档
 - [x] 自动化测试、实际中英文合成播放
-- [ ] 恢复 .git 写权限后导入 checkpoints 阶段提交
-- [ ] 在非沙箱终端验证真实 Kimi 任务（当前自身会话目录写入被阻止）
-- [ ] 安装 Codex CLI 后验证真实 Codex 任务（当前 PATH 中无 Codex）
+- [x] 恢复 .git 写权限后导入 checkpoints 阶段提交
+- [x] 真实 Kimi Code 2.1.1 任务：英文进度提取、只读工具、音频播放、退出码 0
+- [x] 真实 Codex CLI 0.160.0 任务：中文进度提取、只读命令、音频播放、退出码 0

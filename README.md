@@ -104,21 +104,15 @@ Edge TTS 是在线服务，**只发送过滤后的旁白文字**，因此直接�
 
 Windows 使用 Job Object 管理本次启动的进程树，避免依赖全系统进程枚举；取消和正常结束都会清理本次启动的后代进程，防止继承输出管道的后台进程阻止退出。
 
-当前环境验证：31 项自动化测试通过，两个默认音色在线查询成功，中文和英文短句实际合成并完成播放。真实 Kimi 2.1.1 启动冒烟测试在写入自身用户目录时被当前沙箱阻止，失败旁白和退出码处理已验证。当前 PATH 无 Codex CLI，因此 Codex 接入已通过 JSONL 示例和模拟子进程测试，尚未完成真实账户任务验证。
+当前环境验证（2026-10-04）：32 项自动化测试通过，两个默认音色在线查询成功，中文和英文短句实际合成并完成播放。解除早期沙箱限制后，Kimi Code 2.1.1 和 Codex CLI 0.160.0 的真实只读任务均已通过：分别识别英文、中文进度，排除工具内容和最终回答，退出码为 0；启用音频的真实 CLI 联调也正常结束，没有触发文字降级。
+
+本机 Codex 位于 `C:\Users\wangb\AppData\Local\Programs\OpenAI\Codex\bin\codex.exe`，Kimi 位于 `C:\Users\wangb\.kimi-code\bin\kimi.exe`，当前均可从 PATH 调用。曾经的“未找到 Codex”仅代表当时进程的 PATH 查询结果，并不代表未安装。
 
 ## Git 阶段提交
 
-本次环境将 `.git` 设为只读，Git 无法创建 `index.lock`，提权请求也被审批策略拒绝。因此没有声称已创建 Git commit；各实现阶段保存为 `checkpoints/*.patch`（不纳入版本控制）。
+实现初期 `.git` 为只读，各阶段暂存为 `checkpoints/*.patch`（不纳入版本控制）。权限恢复后，6 个阶段补丁已依次导入为正式 Git commit；真实 CLI 联调发现的 PowerShell 命令分类改进也已单独提交。
 
-在恢复 `.git` 写权限后，可从普通 PowerShell 执行：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\tools\commit_checkpoints.ps1
-```
-
-脚本要求原始仓库没有提交、索引为空；逐个将补丁应用到索引并创建提交，保留当前源文件。若已有提交或已暂存内容，脚本停止，避免覆盖你的工作。中途失败会保留索引供检查，不自动重置。
-
-后续开发时，可在每个经过验证的阶段正常 `git add` / `git commit`；`tools/checkpoint.py` 仅作为元数据只读时的备选导出工具。
+后续开发在每个经过验证的阶段正常 `git add` / `git commit`。`tools/checkpoint.py` 保留为元数据只读时的备选导出工具；`tools/commit_checkpoints.ps1` 仅适用于尚无提交、索引为空的原始仓库，当前仓库已有提交，无需再次运行。脚本检测到已有历史或暂存内容时会停止，避免覆盖现有工作。
 
 ## 接口参考
 
