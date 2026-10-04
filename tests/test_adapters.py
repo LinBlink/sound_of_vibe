@@ -4,6 +4,20 @@ from sound_of_vibe.adapters import CodexAdapter, KimiAdapter
 
 
 class AdapterTests(unittest.TestCase):
+    def test_codex_findings_between_tools_are_commentary_with_or_without_phase(self):
+        for phase in (None, "commentary"):
+            adapter = CodexAdapter()
+            message = {"type": "item.completed", "item": {"id": "comment",
+                       "type": "agent_message", "text": "54 tests passed. The playback order is fixed."}}
+            if phase:
+                message["item"]["phase"] = phase
+            events = adapter.feed(message)
+            if phase is None:
+                events = adapter.feed({"type": "item.started", "item": {"id": "tool",
+                                      "type": "command_execution", "command": "pytest"}})
+            self.assertEqual(events[0].action, "commentary")
+            self.assertIn("54 tests passed", events[0].text)
+
     def test_kimi_tool_messages_and_final_answer(self):
         adapter = KimiAdapter()
         events = adapter.feed({"role": "assistant", "content": "我先查看文件。", "tool_calls": [

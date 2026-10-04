@@ -21,12 +21,49 @@ class WireAdapter:
 
     def __init__(self):
         self.pending: Event | None = None
+        self.live = False
+        self.parts: list[str] = []
+        self.step_id = ""
+
+    def flush_parts(self) -> list[Event]:
+        text = "".join(self.parts)
+        self.parts.clear()
+        return [Event("kimi-wire", self.step_id, "commentary", text)] if text else []
 
     def feed(self, record: dict) -> list[Event]:
         if record.get("type") in {"agent.turn.ended", "turn.ended", "turn.prompt"}:
             self.pending = None
+            self.parts.clear()
+            if record.get("type") == "turn.prompt":
+                self.live = False
+            return []
+        if record.get("type") == "context.append_loop_event":
+            event = record.get("event", {})
+            if not isinstance(event, dict):
+                return []
+            self.live = True
+            kind = event.get("type")
+            if kind == "step.begin":
+                self.parts.clear()
+                self.step_id = str(event.get("uuid"))
+            elif kind == "content.part":
+                self.step_id = str(event.get("stepUuid") or self.step_id)
+                part = event.get("part", {})
+                if isinstance(part, dict) and part.get("type") in {"text", "output_text"}:
+                    text = part.get("text")
+                    if isinstance(text, str):
+                        self.parts.append(text)
+            elif kind == "tool.call":
+                return self.flush_parts()
+            elif kind == "step.end":
+                if event.get("finishReason") in {"tool_calls", "tool_use"}:
+                    return self.flush_parts()
+                self.parts.clear()  # Final text belongs to the final answer.
             return []
         if record.get("type") != "agent.message.appended":
+            return []
+        if self.live:
+            # Persisted message snapshots repeat the live events at turn end.
             return []
         envelope = record.get("message", {})
         message, meta = envelope.get("message", {}), envelope.get("meta", {})

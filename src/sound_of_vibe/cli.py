@@ -76,7 +76,8 @@ async def execute(args, extra: list[str]) -> int:
     backend = None if args.text_only else EdgeSpeech({"zh": args.voice_zh, "en": args.voice_en}, args.rate)
     speaker = Speaker(backend,
                       lambda item: print(f"[voice/{item.language}] {item.text}", file=sys.stderr, flush=True),
-                      lambda message: print(f"[sound-of-vibe] {message}", file=sys.stderr, flush=True))
+                      lambda message: print(f"[sound-of-vibe] {message}", file=sys.stderr, flush=True),
+                      interval=1, preserve_progress=True, max_pending=6, prefer_commentary=True)
     if command is not None:
         return await consume_process(command, args.source, args.prompt, narrator, speaker, args.cwd)
     return await replay(args.file, args.source, narrator, speaker, args.failed)

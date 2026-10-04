@@ -15,11 +15,14 @@ from collections import deque
 from pathlib import Path
 
 from sound_of_vibe.kimi_hooks import state_directory
+from sound_of_vibe.rules import commentary_sentences
+from sound_of_vibe.kimi_transcript import WireTail, find_wire
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--long-task", action="store_true", help="Also verify narration during an 18-second tool call")
+    parser.add_argument("--commentary", action="store_true", help="Verify actual intermediate assistant prose in both languages")
     arguments = parser.parse_args()
     if os.name != "nt":
         raise SystemExit("This interactive smoke test requires Windows.")
@@ -82,10 +85,18 @@ def main():
                 ("en", "Read only README-en.md using the Read tool. Do not write files or use shell commands. Answer only the version number."),
                 ("zh", "只用 Read 工具读取尚未查看过的 README-zh.md，不修改文件，不执行命令，最后只回答版本号。"),
             ]
+            if arguments.commentary:
+                prompts = [(language,
+                            ("先用中文在可见回复中说明你接下来如何读取文件和验证版本。" if language == "zh" else
+                             "First explain in English visible prose how you will read the file and verify the version. ") +
+                            f"Then use Read to read README-{language}.md. Do not write files. Your final answer must only be the version.")
+                           for language in ("en", "zh")]
             previous_completions = 0
             session = None
             for language, prompt in prompts:
                 turn_log_offset = len(new_log())
+                wire = find_wire(session) if session else None
+                wire_offset = wire.stat().st_size if wire else 0
                 process.write("\x1b[200~" + prompt + "\x1b[201~\r")
                 wait_for(lambda: new_log().count("[hook/Stop]") > previous_completions)
                 log = new_log()
@@ -96,19 +107,36 @@ def main():
                     raise AssertionError("The two turns did not use the same session")
                 session = sessions[-1]
                 text = "Reading files" if language == "en" else "正在查看文件"
-                wait_for(lambda: f"[voice/{language}] {text} session={session}" in new_log()[turn_log_offset:])
+                if not arguments.commentary:
+                    wait_for(lambda: f"[voice/{language}] {text} session={session}" in new_log()[turn_log_offset:])
                 # Require playback of the actual action, its result, and the
                 # completion; a greeting/completion alone is insufficient.
-                for action in ("start", "read", "read_result", "complete"):
+                actions = ("commentary", "complete") if arguments.commentary else ("start", "read", "read_result", "complete")
+                for action in actions:
                     marker = f"[audio/{language}] Playback completed. action={action} session={session}"
                     wait_for(lambda marker=marker: marker in new_log()[turn_log_offset:])
                 turn_log = new_log()[turn_log_offset:]
                 positions = [turn_log.index(f"[audio/{language}] Playback completed. action={action} session={session}")
-                             for action in ("start", "read", "read_result", "complete")]
+                             for action in actions]
                 if positions != sorted(positions):
                     raise AssertionError("Completion overtook execution narration")
+                if arguments.commentary:
+                    wire = find_wire(session)
+                    if wire is None:
+                        raise AssertionError("No journal for the test session")
+                    expected = [sentence for event in WireTail(wire, wire_offset).poll()
+                                for sentence in commentary_sentences(event.text)]
+                    if not expected:
+                        raise AssertionError("The model did not produce visible intermediate commentary")
+                    for sentence in expected:
+                        if f"[voice/{language}] {sentence.text} session={session}" not in turn_log:
+                            raise AssertionError("Assistant prose was lost or replaced by a template")
+                    count = turn_log.count(f"[audio/{language}] Playback completed. action=commentary session={session}")
+                    if count != len(expected):
+                        raise AssertionError("Not all commentary sentences completed playback")
                 previous_completions = new_log().count("[hook/Stop]")
-                print(f"Passed: {language} start + read + result + completion playback, session={session}", flush=True)
+                label = "actual assistant commentary" if arguments.commentary else "start + read + result + completion"
+                print(f"Passed: {language} {label} playback, session={session}", flush=True)
             if arguments.long_task:
                 offset = len(new_log())
                 prompt = ('Use Bash to run exactly python -c "import time; time.sleep(18); print(123)". '

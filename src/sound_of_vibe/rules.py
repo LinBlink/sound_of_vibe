@@ -166,6 +166,9 @@ def commentary_sentences(text: str) -> list[Narration]:
         if re.match(r'^(?:[+>@$]|---|@@|diff\b|Traceback|File\s+"|\d{4}-\d\d-\d\d|\[(?:INFO|DEBUG|WARN|ERROR)\]|(?:INFO|DEBUG|WARN|ERROR)\b|[•]?\s*(?:Edited|Failed \(exit|Ran )\b)', stripped):
             continue
         stripped = re.sub(r"^(?:[-*•]\s+|\d+[.)]\s+|#{1,6}\s+)", "", stripped)
+        # Short identifiers are part of the explanation (e.g. README.md).
+        # Keep them spoken while omitting long inline code fragments.
+        stripped = re.sub(r"`([^`]{1,80})`", r"\1", stripped)
         stripped = re.sub(r"`[^`]*`", "", stripped)
         stripped = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", stripped)
         stripped = re.sub(r"[*_]+", "", stripped)

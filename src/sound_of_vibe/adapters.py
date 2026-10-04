@@ -95,7 +95,7 @@ class CodexAdapter:
         item_type = item.get("type")
         if item_type == "agent_message" and kind == "item.completed":
             phase = item.get("phase")
-            event = Event(self.source, item_id + ":text", text=as_text(item.get("text")))
+            event = Event(self.source, item_id + ":text", "commentary", text=as_text(item.get("text")))
             if phase == "final_answer":
                 self.pending = None
                 return []

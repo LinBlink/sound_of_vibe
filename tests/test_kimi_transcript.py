@@ -20,6 +20,24 @@ def record(text, final=False, role="assistant", identifier="one"):
 
 
 class TranscriptTests(unittest.TestCase):
+    def test_inline_file_names_remain_readable_in_actual_explanation(self):
+        result = commentary_sentences("我会读取 `README.md`，然后检查版本号。")
+        self.assertEqual(result[0].text, "我会读取 README.md，然后检查版本号。")
+
+    def test_live_prose_is_released_at_tool_call_before_turn_end(self):
+        adapter = WireAdapter()
+        def live(event):
+            return adapter.feed({"type": "context.append_loop_event", "event": event})
+        self.assertEqual(live({"type": "step.begin", "uuid": "step1"}), [])
+        self.assertEqual(live({"type": "content.part", "part": {"type": "think", "think": "DO_NOT_SPEAK"}}), [])
+        self.assertEqual(live({"type": "content.part", "part": {"type": "text", "text": EXPLANATION}}), [])
+        self.assertEqual([event.text for event in live({"type": "tool.call"})], [EXPLANATION])
+        self.assertEqual(live({"type": "step.end", "finishReason": "tool_use"}), [])
+        self.assertEqual(adapter.feed(record(EXPLANATION)), [])
+        live({"type": "step.begin", "uuid": "step2"})
+        live({"type": "content.part", "part": {"type": "text", "text": "FINAL_ANSWER"}})
+        self.assertEqual(live({"type": "step.end", "finishReason": "end_turn"}), [])
+
     def test_user_example_is_spoken_in_full_including_completed_findings(self):
         narrator = Narrator()
         spoken = narrator.consume(Event("kimi-wire", "one", "commentary", EXPLANATION))

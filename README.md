@@ -48,13 +48,17 @@ Run `hooks install` once, then use plain `kimi` in any project. Chinese prompts 
 
 安装会备份 `~/.kimi-code/config.toml`，仅添加带标记的 Hooks 配置，保留其他配置和已有 Hooks；关闭时仅移除本工具的配置块。原生交互界面、工具权限和审批由 Kimi 自己处理。挂钩静默返回，后台进程合成、播放音频，空闲 120 秒后退出，下次任务自动启动。
 
-**全局模式播报任务开始、工具动作、工具结束或失败、审批等待及任务完成**，语言跟随每轮任务。例如“开始处理任务 → 正在查看文件 → 文件已读取，继续处理下一步 → 任务已完成”，英文使用对应英文音色。连续 12 秒没有新阶段时，根据实际状态提示仍在处理、等待工具结果或等待审批；结束、取消和关闭会话后停止定时提示。
+**全局模式会朗读工具调用之间助手实际说的进展说明**，包括“修复后……”“54 项测试通过……”“接下来验证……”这样的整段对话，中文和英文分别使用对应音色。代码 diff、工具输出、报错堆栈、推理内容和最终回答继续过滤。
 
-同类动作 5 秒内去重，语音开始间隔至少 1 秒。保留当前句及最多 6 条待播旁白，新进度不会取消正在合成的句子，完成提示排在待播执行动作后；超过队列上限时合并较旧的待播更新。多个会话共享一个播放队列。Kimi Hooks 不提供完整助手文字流，因此不会逐句朗读助手的进度原文。工具调用前的播报表示即将执行，是否批准仍由 Kimi 决定。
+后台进程从当前 Kimi 会话的 `agents/main/wire.jsonl` 增量读取可见文字，在后续工具调用确认它属于执行过程后播报；从安装后的当前会话游标开始，不重播历史记录。支持已验证的 Kimi Code 2.1.1 Wire 记录格式，遇到未知格式时跳过原文、保留工具动作提示。
 
-The global mode narrates task starts, tool actions/results, approval waits, and completion. It retains execution speech before completion and gives a status reminder after 12 seconds without a new stage. Repeated actions are deduplicated for 5 seconds.
+实际说明优先于排队的通用工具提示。没有说明时，仍播报任务开始、工具动作、工具结束或失败、审批等待及任务完成。连续 12 秒没有新阶段时，根据实际状态提示仍在处理、等待工具结果或等待审批；结束、取消和关闭会话后停止定时提示。
 
-默认日志：`%LOCALAPPDATA%\SoundOfVibe\worker.log`，包含事件类型、会话标识、旁白和播放结果，不记录原始提示词或命令。在线 TTS 仅接收生成的旁白模板。Hooks 失败时静默跳过，不影响 Kimi 工作。
+同类工具动作 5 秒内去重，实际说明按原文去重，不因属于相同动作而丢弃其他句子。语音开始间隔至少 1 秒。保留当前句及最多 6 条待播旁白，新进度不会取消正在合成的句子，完成提示排在待播执行动作后；超过队列上限时合并较旧的待播更新。多个会话共享一个播放队列。工具调用前的播报表示即将执行，是否批准仍由 Kimi 决定。
+
+The global mode reads actual intermediate assistant prose in Chinese and English, including findings and test results. It filters code, tool output, reasoning, and final answers. Tool/status templates remain a fallback, with a reminder after 12 seconds without a new stage.
+
+默认日志：`%LOCALAPPDATA%\SoundOfVibe\worker.log`，包含事件类型、会话标识、过滤后的旁白和播放结果，不复制原始提示词、工具命令或工具结果。在线 TTS 接收过滤后的助手说明或旁白模板，说明可能包含项目名称。Hooks 失败时静默跳过，不影响 Kimi 工作。
 
 配置保存了本仓库虚拟环境的绝对路径；移动仓库或重建 `.venv` 后需重新执行 `hooks install`。上述管理命令从本仓库运行；在其他目录管理时，请使用 `sound-of-vibe.exe` 的完整路径。单次任务包装器会自动避免与全局旁白重复播放。
 
@@ -94,14 +98,14 @@ The global mode narrates task starts, tool actions/results, approval waits, and 
 
 ### 语言和过滤规则 / Language and filtering
 
-- 中文识别“我先查看……”“正在修改……”“接下来验证……”；英文识别 “I'll inspect…”、“I'm updating…”、“Next, I'll test…” 等明确动作句。
+- 已确认属于中间对话的助手文字会完整提取，包括发现、已完成的修复和测试结果；没有明确消息阶段时，先等待后续工具活动证明它是中间进展。通用进度识别仍支持“我先查看……”和 “I'll inspect…” 等动作句。
 - `auto` 逐句选择语言：去掉路径、行内代码和 URL 后含汉字则中文，否则含英文字母则英文。中文夹带 API / Java 等术语仍使用中文音色。
 - 工具模板跟随最近一条已识别进度的语言；没有进度时跟随 prompt，仍无法判断则中文。不同语言的完整句子分别识别。
 - `--language zh/en` 只接纳该语言的进度原文；另一语言通过工具模板播报，不调用翻译服务。
 - 丢弃代码块、缩进代码、diff、堆栈、常见日志行、工具输出、推理内容和最后一条最终回答。不支持获取模型的私有推理。
 - Kimi 和旧版 Codex 事件没有明确的最终回答标记时，将未分类的消息暂存，后续工具活动证明它是中间进度后才提取；末尾暂存消息丢弃。这可能略微延迟旁白。
-- 每条最多一句，中文不超过 60 字、英文不超过 30 词。同一动作和语言 30 秒内去重，普通语音开始至少间隔 3 秒。
-- 队列只保留当前一句和最新待播一句，快速进度会合并；新进度到来后，尚未播放的旧合成结果会被丢弃。已经播放的句子播放完毕再播最新进度。
+- 实际助手说明按句分段，长句分成最多 90 字或 40 词的播放段，不直接截掉后半段。说明按原文去重；包装器的工具模板仍按动作和语言 30 秒去重。
+- 包装器同样优先保留实际说明，保留当前句与最多 6 条待播更新，语音开始间隔至少 1 秒；完成提示排在执行旁白之后。
 
 工具模板覆盖读取、搜索、修改、测试、执行命令和通用工具；命令按可执行程序及参数白名单分类，`echo "pytest"` 不会被误判成运行测试。
 
@@ -125,7 +129,7 @@ Edge TTS 是在线服务，**只发送过滤后的旁白文字**，因此直接�
 .\.venv\Scripts\sound-of-vibe.exe replay codex --file examples/codex-bilingual.jsonl --text-only --failed
 ```
 
-`replay` 去掉 `--text-only` 即启用在线 TTS。示例事件瞬间到达，语音队列通常会合并为最后的终态；要逐一确认两个音色的合成和播放，可运行：
+`replay` 去掉 `--text-only` 即启用在线 TTS。示例事件瞬间到达时，超过队列上限的较旧更新会合并；要逐一确认两个音色的合成和播放，可运行：
 
 ```powershell
 .\.venv\Scripts\python.exe tools/smoke_audio.py
@@ -142,15 +146,19 @@ Edge TTS 是在线服务，**只发送过滤后的旁白文字**，因此直接�
 
 Windows 使用 Job Object 管理本次启动的进程树，避免依赖全系统进程枚举；取消和正常结束都会清理本次启动的后代进程，防止继承输出管道的后台进程阻止退出。
 
-当前环境验证（2026-10-04）：55 项自动化测试通过，两个默认音色在线查询成功，中文和英文短句实际合成并完成播放。解除早期沙箱限制后，Kimi Code 2.1.1 和 Codex CLI 0.160.0 的真实只读任务均已通过：分别识别英文、中文进度，排除工具内容和最终回答，退出码为 0；启用音频的真实 CLI 联调也正常结束，没有触发文字降级。
+当前环境验证（2026-10-04）：64 项自动化测试通过，两个默认音色在线查询成功，中文和英文短句实际合成并完成播放。解除早期沙箱限制后，Kimi Code 2.1.1 和 Codex CLI 0.160.0 的真实只读任务均已通过：分别识别英文、中文进度，排除工具内容和最终回答，退出码为 0；启用音频的真实 CLI 联调也正常结束，没有触发文字降级。
 
 全局 Hooks 另验证了配置安装、关闭和重新开启，以及在独立临时项目中直接启动原生交互式 `kimi`：同一会话连续执行英文、中文只读任务，两种语言的开始、读取、工具结果、完成旁白依次完成播放。18 秒只等待和打印的命令运行期间，也实际播出了等待工具结果的提示，随后正常退出。可选 Windows 联调脚本如下，会调用已登录的 Kimi 模型并读取脚本创建的测试 README：
+
+实际说明模式另外通过原生交互联调：英文和中文工具调用前的可见说明从 Wire 执行事件中提取，每句完成音频播放后才播放任务完成；工具结果和最终版本号均未进入对话播报。用户提供的“修复后……54 项测试通过……接下来验证……”完整段落另有自动化回归测试。
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install pywinpty
 .\.venv\Scripts\python.exe tools/smoke_kimi_interactive.py
 # 另验证长工具调用期间的旁白 / Also check a long tool call
 .\.venv\Scripts\python.exe tools/smoke_kimi_interactive.py --long-task
+# 验证实际中间对话原文 / Verify visible assistant commentary
+.\.venv\Scripts\python.exe tools/smoke_kimi_interactive.py --commentary
 ```
 
 本机 Codex 位于 `C:\Users\wangb\AppData\Local\Programs\OpenAI\Codex\bin\codex.exe`，Kimi 位于 `C:\Users\wangb\.kimi-code\bin\kimi.exe`，当前均可从 PATH 调用。曾经的“未找到 Codex”仅代表当时进程的 PATH 查询结果，并不代表未安装。
