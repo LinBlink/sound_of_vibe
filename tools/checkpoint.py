@@ -7,6 +7,7 @@ import argparse
 import difflib
 import hashlib
 import json
+import subprocess
 from datetime import datetime, timezone
 from email.utils import format_datetime
 from pathlib import Path
@@ -45,8 +46,10 @@ def main():
         raise SystemExit("No changes since the previous checkpoint.")
     number = len(list(output.glob("*.patch"))) + 1
     digest = hashlib.sha1("".join(diffs).encode()).hexdigest()
+    author = subprocess.check_output(["git", "config", "user.name"], cwd=root, text=True).strip()
+    email = subprocess.check_output(["git", "config", "user.email"], cwd=root, text=True).strip()
     patch = (f"From {digest} Mon Sep 17 00:00:00 2001\n"
-             "From: linblink <827650791@qq.com>\n"
+             f"From: {author} <{email}>\n"
              f"Date: {format_datetime(datetime.now(timezone.utc))}\n"
              f"Subject: [PATCH] {args.subject}\n\n---\n" + "".join(diffs)
              + "-- \n2.0.0\n")

@@ -3,11 +3,7 @@ import io
 import json
 import os
 import sys
-import tempfile
 import unittest
-from pathlib import Path
-
-from sound_of_vibe.cli import main
 from sound_of_vibe.rules import Narrator
 from sound_of_vibe.runner import build_command, consume_process
 from sound_of_vibe.speech import Speaker
@@ -83,10 +79,21 @@ class ProcessTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(asyncio.CancelledError):
             await asyncio.wait_for(task, timeout=5)
         if os.name == "nt":
-            process = await asyncio.create_subprocess_exec("tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH",
-                                                           stdout=asyncio.subprocess.PIPE)
-            report, _ = await process.communicate()
-            self.assertNotIn(f'"{pid}"'.encode(), report)
+            import ctypes
+            from ctypes import wintypes
+            kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+            kernel.OpenProcess.restype = wintypes.HANDLE
+            kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+            kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+            handle = kernel.OpenProcess(0x100000, False, pid)  # SYNCHRONIZE
+            if handle:
+                try:
+                    self.assertEqual(kernel.WaitForSingleObject(handle, 0), 0)
+                finally:
+                    kernel.CloseHandle(handle)
+            else:
+                self.assertEqual(ctypes.get_last_error(), 87)  # Already gone, not access denied.
         else:
             with self.assertRaises(ProcessLookupError):
                 os.kill(pid, 0)

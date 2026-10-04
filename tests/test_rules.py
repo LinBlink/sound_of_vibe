@@ -41,6 +41,10 @@ The project has three files.
         self.assertEqual(classify_command("npm run test-fixture"), "command")
         self.assertEqual(classify_command("echo hello && pytest"), "command")
 
+    def test_action_is_not_confused_by_test_file_names_or_later_nouns(self):
+        result = progress_sentences("I'll inspect test.py.\nI'll review the tests.\n我先检查测试文件。\nI'm running tests.")
+        self.assertEqual([item.action for item in result], ["read", "read", "read", "test"])
+
     def test_language_switch_dedup_and_terminal(self):
         now = [0.0]
         narrator = Narrator("检查项目", clock=lambda: now[0])

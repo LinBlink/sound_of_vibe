@@ -1,9 +1,8 @@
 import asyncio
-import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, Mock
 
 from sound_of_vibe.models import Narration
 from sound_of_vibe.speech import EdgeSpeech, Speaker

@@ -20,7 +20,7 @@ TEMPLATES: dict[str, dict[str, str]] = {
     "failed": {"zh": "任务执行失败", "en": "Task failed"},
 }
 ACTION_WORDS = {
-    "test": r"测试|验证|检查结果|\b(?:test\w*|verif\w*|validat\w*)\b",
+    "test": r"运行(?:单元)?测试|测试|验证|检查结果|\b(?:run(?:ning)?|execut(?:e|ing))\s+(?:the\s+)?tests?\b|\b(?:test\w*|verif\w*|validat\w*)\b",
     "search": r"搜索|查找|定位|\b(?:search\w*|find\w*|locat\w*)\b",
     "edit": r"修改|编辑|更新|重构|修复|创建|添加|实现|\b(?:edit\w*|updat\w*|refactor\w*|fix\w*|creat\w*|add\w*|implement\w*)\b",
     "read": r"查看|读取|阅读|检查|分析|\b(?:read\w*|inspect\w*|review\w*|check\w*|analy[sz]\w*|examin\w*)\b",
@@ -123,8 +123,12 @@ def progress_sentences(text: str) -> list[Narration]:
         sentence = " ".join(sentence.split())
         if re.search(r"[{}]|=>|\b(?:def|class|const|function|import)\s+\w+", sentence):
             continue
-        action = next((action for action, pattern in ACTION_WORDS.items()
-                       if re.search(pattern, sentence, re.I)), None)
+        # Classify the first action, not nouns later in the description:
+        # "inspect the tests" is inspection, while "run tests" is testing.
+        action_text = IDENTIFIERS.sub(" ", sentence)
+        matches = [(match.start(), index, action) for index, (action, pattern) in enumerate(ACTION_WORDS.items())
+                   if (match := re.search(pattern, action_text, re.I))]
+        action = min(matches)[2] if matches else None
         if not action:
             continue
         if language == "zh" and len(sentence) > 60:
@@ -141,7 +145,7 @@ class Narrator:
     def __init__(self, prompt: str = "", language: Literal["auto", "zh", "en"] = "auto",
                  clock: Callable[[], float] = monotonic):
         self.mode = language
-        self.language: Language = detect_language(prompt) or "zh" if language == "auto" else language
+        self.language: Language = (detect_language(prompt) or "zh") if language == "auto" else language
         self.clock = clock
         self.seen: OrderedDict[str, None] = OrderedDict()
         self.recent: dict[tuple[str, str], float] = {}
