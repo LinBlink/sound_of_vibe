@@ -78,20 +78,23 @@ class EdgeSpeech:
 
 
 class Speaker:
-    """One current utterance and one replaceable pending utterance.
+    """One current utterance and a bounded pending queue.
 
+    Default: latest pending only. Preserved mode uses a configurable queue bound.
     Text output is immediate. Audio pacing never blocks the event reader.
     """
 
     def __init__(self, backend: EdgeSpeech | None,
                  output: Callable[[Narration], None], diagnostic: Callable[[str], None],
-                 interval: float = 3, continuous: bool = False, preserve_progress: bool = False):
+                 interval: float = 3, continuous: bool = False, preserve_progress: bool = False,
+                 max_pending: int = 3):
         self.backend = backend
         self.output = output
         self.diagnostic = diagnostic
         self.interval = interval
         self.continuous = continuous
         self.preserve_progress = preserve_progress
+        self.max_pending = max(1, max_pending)
         self.backlog: deque[Narration] = deque()
         self.pending: Narration | None = None
         self.wake = asyncio.Event()
@@ -105,11 +108,19 @@ class Speaker:
             return
         self.output(narration)
         self.terminal = narration.terminal
+        if self.preserve_progress and self.pending is None and self.backlog:
+            self.pending = self.backlog.popleft()
         if self.preserve_progress and self.pending is not None:
-            # Preserve the next action, plus the two most recent updates. A
+            # Preserve the next action and a bounded number of recent updates. A
             # completion must follow progress rather than overwrite all of it.
-            if len(self.backlog) >= 2:
-                self.backlog.popleft()
+            if len(self.backlog) >= self.max_pending - 1:
+                if self.backlog:
+                    self.backlog.popleft()
+                else:
+                    self.pending = narration
+                    self.generation += 1
+                    self.wake.set()
+                    return
             self.backlog.append(narration)
         else:
             self.pending = narration

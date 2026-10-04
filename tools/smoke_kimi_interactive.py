@@ -5,6 +5,7 @@ global hooks. Runs two read-only requests through the original interactive TUI.
 """
 
 import os
+import argparse
 import re
 import shutil
 import tempfile
@@ -17,6 +18,9 @@ from sound_of_vibe.kimi_hooks import state_directory
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--long-task", action="store_true", help="Also verify narration during an 18-second tool call")
+    arguments = parser.parse_args()
     if os.name != "nt":
         raise SystemExit("This interactive smoke test requires Windows.")
     from winpty import PtyProcess
@@ -45,7 +49,8 @@ def main():
 
     with tempfile.TemporaryDirectory(prefix="sound-of-vibe-interactive-") as temporary:
         root = Path(temporary)
-        (root / "README.md").write_text("Global voice smoke test. Version: 0.1.0.\n", encoding="utf-8")
+        for language in ("en", "zh"):
+            (root / f"README-{language}.md").write_text(f"Global {language} voice smoke test. Version: 0.1.0.\n", encoding="utf-8")
         process = PtyProcess.spawn([executable], cwd=str(root), dimensions=(32, 110))
 
         def read_terminal():
@@ -74,8 +79,8 @@ def main():
             wait_for(lambda: "Welcome to Kimi Code" in "".join(chunks), timeout=10)
             print("Original interactive kimi started in an unrelated project.", flush=True)
             prompts = [
-                ("en", "Read only README.md using the Read tool. Do not write files or use shell commands. Answer only the version number."),
-                ("zh", "只用 Read 工具读取 README.md，不修改文件，不执行命令，最后只回答版本号。"),
+                ("en", "Read only README-en.md using the Read tool. Do not write files or use shell commands. Answer only the version number."),
+                ("zh", "只用 Read 工具读取尚未查看过的 README-zh.md，不修改文件，不执行命令，最后只回答版本号。"),
             ]
             previous_completions = 0
             session = None
@@ -91,15 +96,27 @@ def main():
                     raise AssertionError("The two turns did not use the same session")
                 session = sessions[-1]
                 text = "Reading files" if language == "en" else "正在查看文件"
-                if f"[voice/{language}] {text}" not in log:
-                    raise AssertionError(f"Missing {language} tool narration")
+                wait_for(lambda: f"[voice/{language}] {text} session={session}" in new_log()[turn_log_offset:])
                 # Require playback of the actual action, its result, and the
                 # completion; a greeting/completion alone is insufficient.
                 for action in ("start", "read", "read_result", "complete"):
-                    marker = f"[audio/{language}] Playback completed. action={action}"
+                    marker = f"[audio/{language}] Playback completed. action={action} session={session}"
                     wait_for(lambda marker=marker: marker in new_log()[turn_log_offset:])
+                turn_log = new_log()[turn_log_offset:]
+                positions = [turn_log.index(f"[audio/{language}] Playback completed. action={action} session={session}")
+                             for action in ("start", "read", "read_result", "complete")]
+                if positions != sorted(positions):
+                    raise AssertionError("Completion overtook execution narration")
                 previous_completions = new_log().count("[hook/Stop]")
                 print(f"Passed: {language} start + read + result + completion playback, session={session}", flush=True)
+            if arguments.long_task:
+                offset = len(new_log())
+                prompt = ('Use Bash to run exactly python -c "import time; time.sleep(18); print(123)". '
+                          'This only waits and prints; do not write files. Wait for the result, then answer only 123.')
+                process.write("\x1b[200~" + prompt + "\x1b[201~\r")
+                wait_for(lambda: f"[audio/en] Playback completed. action=tool_wait session={session}" in new_log()[offset:], timeout=60)
+                wait_for(lambda: f"[audio/en] Playback completed. action=complete session={session}" in new_log()[offset:], timeout=60)
+                print("Passed: in-progress audio during a long tool call.", flush=True)
             process.write("/exit\r")
             wait_for(lambda: not process.isalive(), timeout=5)
             print("Interactive kimi exited normally.", flush=True)

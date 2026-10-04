@@ -48,7 +48,11 @@ Run `hooks install` once, then use plain `kimi` in any project. Chinese prompts 
 
 安装会备份 `~/.kimi-code/config.toml`，仅添加带标记的 Hooks 配置，保留其他配置和已有 Hooks；关闭时仅移除本工具的配置块。原生交互界面、工具权限和审批由 Kimi 自己处理。挂钩静默返回，后台进程合成、播放音频，空闲 120 秒后退出，下次任务自动启动。
 
-**全局模式播报工具动作和完成状态**（如“正在查看文件” / “Reading files”），语言跟随每轮任务。Kimi Hooks 不提供完整助手文字流，因此此模式不会逐句朗读助手的进度原文。工具调用前的播报表示即将执行，是否批准仍由 Kimi 决定。快速进度会合并，多个会话共享一个播放队列。
+**全局模式播报任务开始、工具动作、工具结束或失败、审批等待及任务完成**，语言跟随每轮任务。例如“开始处理任务 → 正在查看文件 → 文件已读取，继续处理下一步 → 任务已完成”，英文使用对应英文音色。连续 12 秒没有新阶段时，根据实际状态提示仍在处理、等待工具结果或等待审批；结束、取消和关闭会话后停止定时提示。
+
+同类动作 5 秒内去重，语音开始间隔至少 1 秒。保留当前句及最多 6 条待播旁白，新进度不会取消正在合成的句子，完成提示排在待播执行动作后；超过队列上限时合并较旧的待播更新。多个会话共享一个播放队列。Kimi Hooks 不提供完整助手文字流，因此不会逐句朗读助手的进度原文。工具调用前的播报表示即将执行，是否批准仍由 Kimi 决定。
+
+The global mode narrates task starts, tool actions/results, approval waits, and completion. It retains execution speech before completion and gives a status reminder after 12 seconds without a new stage. Repeated actions are deduplicated for 5 seconds.
 
 默认日志：`%LOCALAPPDATA%\SoundOfVibe\worker.log`，包含事件类型、会话标识、旁白和播放结果，不记录原始提示词或命令。在线 TTS 仅接收生成的旁白模板。Hooks 失败时静默跳过，不影响 Kimi 工作。
 
@@ -138,13 +142,15 @@ Edge TTS 是在线服务，**只发送过滤后的旁白文字**，因此直接�
 
 Windows 使用 Job Object 管理本次启动的进程树，避免依赖全系统进程枚举；取消和正常结束都会清理本次启动的后代进程，防止继承输出管道的后台进程阻止退出。
 
-当前环境验证（2026-10-04）：48 项自动化测试通过，两个默认音色在线查询成功，中文和英文短句实际合成并完成播放。解除早期沙箱限制后，Kimi Code 2.1.1 和 Codex CLI 0.160.0 的真实只读任务均已通过：分别识别英文、中文进度，排除工具内容和最终回答，退出码为 0；启用音频的真实 CLI 联调也正常结束，没有触发文字降级。
+当前环境验证（2026-10-04）：55 项自动化测试通过，两个默认音色在线查询成功，中文和英文短句实际合成并完成播放。解除早期沙箱限制后，Kimi Code 2.1.1 和 Codex CLI 0.160.0 的真实只读任务均已通过：分别识别英文、中文进度，排除工具内容和最终回答，退出码为 0；启用音频的真实 CLI 联调也正常结束，没有触发文字降级。
 
-全局 Hooks 另验证了配置安装、关闭和重新开启，以及在独立临时项目中直接启动原生交互式 `kimi`：同一会话连续执行英文、中文只读任务，两种语音完成播放，正常退出。可选 Windows 联调脚本如下，会调用已登录的 Kimi 模型并读取脚本创建的测试 README：
+全局 Hooks 另验证了配置安装、关闭和重新开启，以及在独立临时项目中直接启动原生交互式 `kimi`：同一会话连续执行英文、中文只读任务，两种语言的开始、读取、工具结果、完成旁白依次完成播放。18 秒只等待和打印的命令运行期间，也实际播出了等待工具结果的提示，随后正常退出。可选 Windows 联调脚本如下，会调用已登录的 Kimi 模型并读取脚本创建的测试 README：
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install pywinpty
 .\.venv\Scripts\python.exe tools/smoke_kimi_interactive.py
+# 另验证长工具调用期间的旁白 / Also check a long tool call
+.\.venv\Scripts\python.exe tools/smoke_kimi_interactive.py --long-task
 ```
 
 本机 Codex 位于 `C:\Users\wangb\AppData\Local\Programs\OpenAI\Codex\bin\codex.exe`，Kimi 位于 `C:\Users\wangb\.kimi-code\bin\kimi.exe`，当前均可从 PATH 调用。曾经的“未找到 Codex”仅代表当时进程的 PATH 查询结果，并不代表未安装。

@@ -33,6 +33,32 @@ def utterance(text, terminal=False):
 
 
 class SpeakerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_completion_arriving_during_second_playback_keeps_fifo_order(self):
+        backend = FakeSpeech()
+        reading = asyncio.Event()
+        finish_reading = asyncio.Event()
+        original = backend.speak
+
+        async def speak(narration, stale):
+            await original(narration, stale)
+            if narration.text == "reading":
+                reading.set()
+                await finish_reading.wait()
+
+        backend.speak = speak
+        speaker = Speaker(backend, lambda _: None, self.fail, interval=0,
+                          continuous=True, preserve_progress=True)
+        speaker.submit(utterance("starting"))
+        await backend.started.wait()
+        speaker.submit(utterance("reading"))
+        speaker.submit(utterance("read finished"))
+        backend.release.set()
+        await reading.wait()
+        speaker.submit(utterance("complete", True))
+        finish_reading.set()
+        await speaker.close()
+        self.assertEqual(backend.spoken, ["starting", "reading", "read finished", "complete"])
+
     async def test_preserved_actions_are_not_cancelled_by_fast_completion(self):
         backend = FakeSpeech()
         stale_callbacks = []

@@ -15,6 +15,7 @@ import time
 import uuid
 from collections import OrderedDict
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 
 from .adapters import as_arguments
@@ -199,7 +200,7 @@ class LoggedSpeech(EdgeSpeech):
     async def speak(self, narration, stale):
         played = await super().speak(narration, stale)
         if played:
-            log(self.directory, f"[audio/{narration.language}] Playback completed. action={narration.action}")
+            log(self.directory, f"[audio/{narration.language}] Playback completed. action={narration.action} session={narration.session}")
         return played
 
 
@@ -226,7 +227,7 @@ class HookNarrator:
             return
         narrator.recent[key] = now
         self.current_session = session
-        self.speaker.submit(Narration(PROGRESS_TEXT[action][narrator.language], narrator.language, action))
+        self.speaker.submit(Narration(PROGRESS_TEXT[action][narrator.language], narrator.language, action, session=session))
 
     def tick(self):
         """Speak only while a turn is active; never invent model reasoning."""
@@ -292,7 +293,7 @@ class HookNarrator:
             return
         for narration in narrator.consume(source):
             self.current_session = session
-            self.speaker.submit(narration)
+            self.speaker.submit(replace(narration, session=session))
 
 
 async def worker(directory: Path, token: str, idle_seconds: float = IDLE_SECONDS):
@@ -302,8 +303,9 @@ async def worker(directory: Path, token: str, idle_seconds: float = IDLE_SECONDS
     settings = load_settings(directory)
     backend = None if settings.get("text_only", False) else LoggedSpeech(directory, settings)
     speaker = Speaker(backend,
-                      lambda item: log(directory, f"[voice/{item.language}] {item.text}"),
-                      lambda message: log(directory, message), interval=1, continuous=True, preserve_progress=True)
+                      lambda item: log(directory, f"[voice/{item.language}] {item.text} session={item.session}"),
+                      lambda message: log(directory, message), interval=1, continuous=True,
+                      preserve_progress=True, max_pending=6)
     narrator = HookNarrator(speaker, settings["language"])
     last_event = time.monotonic()
     cancel = False

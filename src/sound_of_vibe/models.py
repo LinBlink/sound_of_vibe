@@ -22,3 +22,4 @@ class Narration:
     language: Language
     action: str
     terminal: bool = False
+    session: str = ""
