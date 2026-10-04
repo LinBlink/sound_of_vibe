@@ -84,6 +84,12 @@ class ProcessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, 0)
         self.assertEqual([s.text for s in spoken], ["任务已完成"])
 
+    async def test_kimi_wrapper_disables_only_our_global_voice_hook(self):
+        code = "import os; print(os.environ.get('SOUND_OF_VIBE_DISABLED'))"
+        result, output, _, _, _ = await self.run_fake(code)
+        self.assertEqual(result, 0)
+        self.assertEqual(output.strip(), "1")
+
     async def test_cancel_reaps_process(self):
         output = io.StringIO()
         speaker = Speaker(None, lambda _: None, self.fail)

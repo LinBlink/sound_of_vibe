@@ -54,11 +54,12 @@ class EdgeSpeech:
                         raise
             # New progress can arrive while the network request is running.
             if stale():
-                return
+                return False
             self.mixer.music.load(str(path))
             self.mixer.music.play()
             while self.mixer.music.get_busy():
                 await asyncio.sleep(0.05)
+            return True
         finally:
             try:
                 if self.mixer:
@@ -83,11 +84,12 @@ class Speaker:
 
     def __init__(self, backend: EdgeSpeech | None,
                  output: Callable[[Narration], None], diagnostic: Callable[[str], None],
-                 interval: float = 3):
+                 interval: float = 3, continuous: bool = False):
         self.backend = backend
         self.output = output
         self.diagnostic = diagnostic
         self.interval = interval
+        self.continuous = continuous
         self.pending: Narration | None = None
         self.wake = asyncio.Event()
         self.generation = 0
@@ -96,7 +98,7 @@ class Speaker:
         self.task: asyncio.Task | None = None
 
     def submit(self, narration: Narration):
-        if self.closed or self.terminal:
+        if self.closed or (self.terminal and not self.continuous):
             return
         self.output(narration)
         self.terminal = narration.terminal
@@ -157,3 +159,19 @@ class Speaker:
                     raise
         if self.backend:
             self.backend.close()
+
+    async def interrupt(self):
+        """Stop this utterance immediately, retaining the reusable speaker."""
+        self.pending = None
+        self.generation += 1
+        self.wake.clear()
+        if self.task:
+            self.task.cancel()
+            try:
+                await self.task
+            except asyncio.CancelledError:
+                pass
+            self.task = None
+        if self.backend:
+            self.backend.close()
+        self.terminal = False
