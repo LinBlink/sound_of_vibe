@@ -61,7 +61,7 @@ def remove_owned(original: dict) -> dict:
 
 
 def install(config: Path | None = None, state: Path | None = None,
-            language: str = "auto", voices: dict | None = None, rate: str = "+10%",
+            language: str = "auto", voices: dict | None = None, rate: str = "+0%",
             python: Path | None = None, text_only: bool = False) -> dict:
     config = config or config_path()
     state = (state or codex_state()).resolve()
@@ -78,8 +78,10 @@ def install(config: Path | None = None, state: Path | None = None,
     for event in HOOK_EVENTS:
         updated["hooks"].setdefault(event, []).append({"hooks": [{"type": "command", "command": command,
                                                "timeout": 3, "statusMessage": MARKER}]})
-    settings = {"enabled": True, "language": language, "voices": voices or DEFAULT_VOICES,
-                "rate": rate, "text_only": text_only, "active_idle_seconds": 600}
+    previous = json.loads((state / "settings.json").read_text(encoding="utf-8")) if (state / "settings.json").exists() else {}
+    settings = {**previous, "enabled": True, "language": language, "voices": voices or DEFAULT_VOICES,
+                "rate": rate, "text_only": text_only, "active_idle_seconds": 600,
+                "per_session_voice": previous.get("per_session_voice", True)}
     backup = backup_config(config)
     atomic_write(state / "settings.json", json.dumps(settings, ensure_ascii=False, indent=2) + "\n")
     atomic_write(config, json.dumps(updated, ensure_ascii=False, indent=2) + "\n")

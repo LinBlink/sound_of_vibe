@@ -6,6 +6,12 @@ from contextlib import closing
 from pathlib import Path
 
 
+def calm_voices(catalog):
+    expressive = {"Passion", "Lively", "Cute", "Humorous", "Expressive", "Cheerful", "Sunshine", "Bright"}
+    return [voice for voice in catalog
+            if not expressive.intersection(voice.get("VoiceTag", {}).get("VoicePersonalities", []))]
+
+
 class VoiceAssignments:
     def __init__(self, directory: Path):
         directory.mkdir(parents=True, exist_ok=True)
@@ -15,7 +21,7 @@ class VoiceAssignments:
 
     def choose(self, session: str, preferred: dict, catalog: list, now=None) -> dict:
         now = time.time() if now is None else now
-        pools = {language: sorted({v["ShortName"] for v in catalog
+        pools = {language: sorted({v["ShortName"] for v in calm_voices(catalog)
                                   if v["Locale"].startswith(language + "-")})
                  for language in ("zh", "en")}
         with closing(sqlite3.connect(self.path, timeout=5)) as db, db:

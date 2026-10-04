@@ -165,7 +165,7 @@ class SpeakerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(backend.spoken, ["first", "latest"])
 
     async def test_synthesis_retry_and_tempfile_cleanup(self):
-        speech = EdgeSpeech({"en": "en-US-AriaNeural"}, timeout=0.02)
+        speech = EdgeSpeech({"en": "en-US-AriaNeural"}, timeout=0.02, robotic=False)
         attempts = []
 
         async def save(path):
@@ -185,7 +185,7 @@ class SpeakerTests(unittest.IsolatedAsyncioTestCase):
         music.unload.assert_called_once()
 
     async def test_synthesis_timeout_and_stale_progress(self):
-        speech = EdgeSpeech({"en": "en-US-AriaNeural"}, timeout=0.01)
+        speech = EdgeSpeech({"en": "en-US-AriaNeural"}, timeout=0.01, robotic=False)
         paths = []
 
         async def save(path):
@@ -201,7 +201,7 @@ class SpeakerTests(unittest.IsolatedAsyncioTestCase):
         speech.mixer.music.play.assert_not_called()
 
     async def test_cancelled_synthesis_removes_partial_audio(self):
-        speech = EdgeSpeech({"en": "en-US-AriaNeural"})
+        speech = EdgeSpeech({"en": "en-US-AriaNeural"}, robotic=False)
         started = asyncio.Event()
         paths = []
 
@@ -221,7 +221,7 @@ class SpeakerTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(Path(paths[0]).exists())
 
     async def test_stale_synthesis_is_not_played(self):
-        speech = EdgeSpeech({"en": "en-US-AriaNeural"})
+        speech = EdgeSpeech({"en": "en-US-AriaNeural"}, robotic=False)
         speech.edge = SimpleNamespace(Communicate=lambda *args, **kwargs: SimpleNamespace(save=AsyncMock()))
         speech.mixer = SimpleNamespace(music=Mock())
         await speech.speak(utterance("old progress"), lambda: True)

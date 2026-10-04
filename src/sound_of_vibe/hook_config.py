@@ -97,7 +97,7 @@ def backup_config(path: Path) -> Path | None:
 
 def install(config: Path | None = None, state: Path | None = None,
             language: str = "auto", voices: dict | None = None,
-            rate: str = "+10%", python: Path | None = None, text_only: bool = False) -> dict:
+            rate: str = "+0%", python: Path | None = None, text_only: bool = False) -> dict:
     config = config or config_path()
     state = (state or state_directory()).resolve()
     python = python or Path(sys.executable)
@@ -113,8 +113,9 @@ def install(config: Path | None = None, state: Path | None = None,
     if len(parsed.get("hooks", [])) < len(HOOK_EVENTS):
         raise ValueError("Generated hook configuration is invalid")
     state.mkdir(parents=True, exist_ok=True, mode=0o700)
-    settings = {"enabled": True, "language": language, "voices": voices or DEFAULT_VOICES,
-                "rate": rate, "text_only": text_only}
+    previous = json.loads((state / "settings.json").read_text(encoding="utf-8")) if (state / "settings.json").exists() else {}
+    settings = {**previous, "enabled": True, "language": language, "voices": voices or DEFAULT_VOICES,
+                "rate": rate, "text_only": text_only, "per_session_voice": previous.get("per_session_voice", True)}
     backup = backup_config(config)
     atomic_write(state / "settings.json", json.dumps(settings, ensure_ascii=False, indent=2) + "\n")
     atomic_write(config, updated)

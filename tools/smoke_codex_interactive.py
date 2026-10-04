@@ -77,9 +77,14 @@ def main():
         try:
             wait_for(lambda: "Trust and continue" in transcript()
                      or re.search(r"Context\s*\d+% used", transcript()), timeout=20)
+            # The initial frame can render the composer before the folder trust
+            # dialog. Let startup finish before deciding which UI is active.
+            time.sleep(1)
             if "Trust and continue" in transcript():
                 # This directory only contains the test files we just created.
+                chunks.clear()
                 process.write("\r")
+                wait_for(lambda: re.search(r"Context\s*\d+% used", transcript()), timeout=20)
             time.sleep(1)
             if "hooks need review" in transcript().lower() or "trust all and continue" in transcript().lower():
                 raise RuntimeError("Review and trust the voice hooks through Codex /hooks first")
@@ -120,6 +125,17 @@ def main():
                 if output.rfind(audio_marker) > output.index(marker):
                     raise AssertionError("Completion overtook assistant commentary")
                 print(f"Passed: {language} actual commentary + audio, session={session}", flush=True)
+            log_offset = len(new_log())
+            question_prompt = "不要执行工具。只问我一句中文问题，询问应选择中文音色还是英文音色，并以问号结束。等待我的回答。"
+            process.write("\x1b[200~" + question_prompt + "\x1b[201~")
+            time.sleep(.4)
+            process.write("\r")
+            question_marker = f"[audio/zh] Playback completed. action=ask session={session}"
+            wait_for(lambda: question_marker in new_log()[log_offset:], timeout=90)
+            output = new_log()[log_offset:]
+            if output.count(question_marker) != 1 or "Playback completed. action=complete" in output:
+                raise AssertionError("Question must play one question chime without a completion chime")
+            print("Passed: visible question played the distinct answer-needed chime.", flush=True)
             process.write("/exit")
             time.sleep(.4)
             process.write("\r")

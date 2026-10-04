@@ -7,7 +7,7 @@ name = "sound-of-vibe"
 version = "0.1.0"
 description = "Chinese and English progress narration for Codex and Kimi CLI"
 requires-python = ">=3.11"
-dependencies = ["edge-tts>=7.2,<8", "pygame>=2.6,<3"]
+dependencies = ["edge-tts>=7.2,<8", "pygame>=2.6,<3", "praat-parselmouth>=0.4.6,<0.5", "soundfile>=0.13,<0.14"]
 
 [project.scripts]
 sound-of-vibe = "sound_of_vibe.cli:main"

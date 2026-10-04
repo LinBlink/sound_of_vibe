@@ -36,7 +36,7 @@ def parser() -> argparse.ArgumentParser:
             sub.add_argument("--language", choices=("auto", "zh", "en"), default="auto")
             sub.add_argument("--voice-zh", default=DEFAULT_VOICES["zh"])
             sub.add_argument("--voice-en", default=DEFAULT_VOICES["en"])
-            sub.add_argument("--rate", type=rate_value, default="+10%")
+            sub.add_argument("--rate", type=rate_value, default="+0%")
             sub.add_argument("--text-only", action="store_true", help="Log hook narration without audio")
     for name in ("run", "replay"):
         sub = commands.add_parser(name, help="Launch an agent" if name == "run" else "Replay captured JSONL without an agent")
@@ -45,7 +45,7 @@ def parser() -> argparse.ArgumentParser:
         sub.add_argument("--language", choices=("auto", "zh", "en"), default="auto")
         sub.add_argument("--voice-zh", default=DEFAULT_VOICES["zh"])
         sub.add_argument("--voice-en", default=DEFAULT_VOICES["en"])
-        sub.add_argument("--rate", type=rate_value, default="+10%")
+        sub.add_argument("--rate", type=rate_value, default="+0%")
         sub.add_argument("--text-only", action="store_true", help="Disable speech; run mode still launches the agent")
         if name == "run":
             sub.add_argument("--cwd", type=Path, default=Path.cwd())
@@ -77,7 +77,9 @@ async def execute(args, extra: list[str]) -> int:
         command = expand_windows_shim(build_command(
             args.source, resolve_executable(args.source, args.executable), args.prompt, extra), args.source)
     narrator = Narrator(args.prompt, args.language)
-    backend = None if args.text_only else EdgeSpeech({"zh": args.voice_zh, "en": args.voice_en}, args.rate)
+    from .kimi_hooks import state_directory
+    from .window_speech import WindowSpeech
+    backend = None if args.text_only else WindowSpeech({"zh": args.voice_zh, "en": args.voice_en}, args.rate, state_directory())
     speaker = Speaker(backend,
                       lambda item: print(f"[voice/{item.language}] {item.text}", file=sys.stderr, flush=True),
                       lambda message: print(f"[sound-of-vibe] {message}", file=sys.stderr, flush=True),

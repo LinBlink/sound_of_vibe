@@ -12,6 +12,7 @@ from urllib.request import Request, urlopen
 
 from sound_of_vibe.codex_transcript import RolloutAdapter
 from sound_of_vibe.kimi_transcript import WireAdapter
+from sound_of_vibe.kimi_hooks import HookNarrator
 from sound_of_vibe.models import Narration
 from sound_of_vibe.rules import asks_user, classify_tool
 from sound_of_vibe.speech import EdgeSpeech, Speaker
@@ -25,6 +26,27 @@ PREFERRED = {"zh": "zh-0", "en": "en-0"}
 
 
 class VoiceFeatureTests(unittest.TestCase):
+    def test_mechanical_resynthesis_flattens_pitch_and_preserves_duration(self):
+        import numpy as np
+        import parselmouth
+        import soundfile as sf
+        from io import BytesIO
+        from sound_of_vibe.robotic import mechanical_audio
+        rate = 24000
+        t = np.arange(rate) / rate
+        signal = 0.3 * np.sin(2 * np.pi * (160 * t + 40 * t * t))
+        source = BytesIO()
+        sf.write(source, signal, rate, format='WAV')
+        output = mechanical_audio(source.getvalue(), 'Male')
+        data, actual_rate = sf.read(BytesIO(output))
+        self.assertEqual(actual_rate, rate)
+        self.assertLess(abs(len(data) - len(signal)), 2)
+        f0 = parselmouth.Sound(data, sampling_frequency=rate).to_pitch(pitch_floor=60, pitch_ceiling=500).selected_array['frequency']
+        voiced = f0[f0 > 0][5:-5]
+        self.assertGreater(len(voiced), 20)
+        self.assertLess(np.std(voiced), 5)
+        self.assertAlmostEqual(float(np.median(voiced)), 120, delta=5)
+
     def test_concurrent_workers_unique_stable_bilingual_and_recovery(self):
         with tempfile.TemporaryDirectory() as root:
             registry = VoiceAssignments(Path(root))
@@ -102,6 +124,17 @@ class VoiceFeatureTests(unittest.TestCase):
 
 
 class VoiceAudioTests(unittest.IsolatedAsyncioTestCase):
+    async def test_stop_before_task_complete_uses_question_chime_once(self):
+        output = []
+        speaker = Speaker(None, output.append, self.fail, continuous=True)
+        narrator = HookNarrator(speaker)
+        await narrator.feed({'session': 's', 'kind': 'TurnStarted', 'id': 'turn', 'language': 'en'})
+        narrator.streams['s'] = SimpleNamespace(adapter=SimpleNamespace(question=True), poll=lambda: [])
+        await narrator.feed({'session': 's', 'kind': 'Stop', 'id': 'stop'})
+        await narrator.feed({'session': 's', 'kind': 'Stop', 'id': 'stop2'})
+        await speaker.close()
+        self.assertEqual([n.action for n in output], ['start', 'ask'])
+
     async def test_waiting_is_logged_without_audio_and_questions_survive_commentary(self):
         backend = SimpleNamespace(initialize=AsyncMock(), speak=AsyncMock(), close=Mock())
         output = []

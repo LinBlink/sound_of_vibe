@@ -12,12 +12,13 @@ from pathlib import Path
 
 from .hook_config import atomic_write
 from .kimi_hooks import load_settings, state_directory
+from .voice_assignment import calm_voices
 
 
 async def catalog():
     import edge_tts
     voices = await asyncio.wait_for(edge_tts.list_voices(), 15)
-    return [v for v in voices if v["Locale"].startswith(("zh-", "en-"))]
+    return calm_voices([v for v in voices if v["Locale"].startswith(("zh-", "en-"))])
 
 
 def validate(data, voices):
@@ -61,7 +62,8 @@ async def preview(voice, rate, voices):
                 audio.extend(chunk["data"])
                 if len(audio) > 4 * 1024 * 1024:
                     raise ValueError("Preview audio too large")
-        return bytes(audio)
+        from .robotic import mechanical_audio
+        return await asyncio.to_thread(mechanical_audio, bytes(audio), entry["Gender"])
     return await asyncio.wait_for(synthesize(), 25)
 
 
@@ -118,7 +120,7 @@ def create_server(root=None, voices=None):
                     return self.reply({"saved": True})
                 if self.path == "/api/preview":
                     _, rate = validate(data, voices)
-                    return self.reply(asyncio.run(preview(data.get("voice"), rate, voices)), "audio/mpeg")
+                    return self.reply(asyncio.run(preview(data.get("voice"), rate, voices)), "audio/wav")
                 self.reply({"error": "Not found"}, status=404)
             except (ValueError, TypeError) as error:
                 self.reply({"error": str(error)}, status=400)

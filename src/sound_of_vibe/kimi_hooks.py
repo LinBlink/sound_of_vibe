@@ -353,7 +353,10 @@ class HookNarrator:
             return
         elif kind in {"Stop", "StopFailure"}:
             self.active.pop(session, None)
-            source = Event("kimi-hook", event["id"], "failed" if kind == "StopFailure" else "complete", terminal=True)
+            tail = self.streams.get(session)
+            question = bool(tail and getattr(tail.adapter, "question", False))
+            action = "failed" if kind == "StopFailure" else ("ask" if question else "complete")
+            source = Event("kimi-hook", event["id"], action, terminal=True)
         else:
             return
         for narration in narrator.consume(source):

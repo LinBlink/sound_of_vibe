@@ -9,19 +9,20 @@ from pathlib import Path
 
 from .models import Narration
 
-DEFAULT_VOICES = {"zh": "zh-CN-XiaoxiaoNeural", "en": "en-US-AriaNeural"}
+DEFAULT_VOICES = {"zh": "zh-CN-YunyangNeural", "en": "en-US-EricNeural"}
 SILENT_ACTIONS = {"working", "tool_wait"}
 CHIME_ACTIONS = {"complete", "ask", "permission"}
 
 
 class EdgeSpeech:
-    def __init__(self, voices: dict[str, str], rate: str = "+10%", timeout: float = 10):
+    def __init__(self, voices: dict[str, str], rate: str = "+0%", timeout: float = 10, robotic: bool = True):
         self.voices = voices
         self.rate = rate
         self.timeout = timeout
         self.mixer = None
         self.edge = None
         self.catalog = []
+        self.robotic = robotic
 
     async def initialize(self):
         import edge_tts
@@ -64,10 +65,11 @@ class EdgeSpeech:
         os.close(descriptor)
         path = Path(filename)
         try:
+            voice = self.voice_for(narration)
             for attempt in range(2):
                 try:
                     communicate = self.edge.Communicate(narration.text,
-                                                       self.voice_for(narration), rate=self.rate)
+                                                       voice, rate=self.rate)
                     await asyncio.wait_for(communicate.save(str(path)), timeout=self.timeout)
                     break
                 except asyncio.CancelledError:
@@ -75,10 +77,15 @@ class EdgeSpeech:
                 except Exception:
                     if attempt or stale():
                         raise
+            if self.robotic:
+                from .robotic import mechanical_audio
+                gender = next((v["Gender"] for v in self.catalog if v["ShortName"] == voice), "Female")
+                audio = await asyncio.to_thread(mechanical_audio, path.read_bytes(), gender)
+                path.write_bytes(audio)
             # New progress can arrive while the network request is running.
             if stale():
                 return False
-            self.mixer.music.load(str(path))
+            self.mixer.music.load(str(path), namehint="wav" if self.robotic else "mp3")
             self.mixer.music.play()
             while self.mixer.music.get_busy():
                 await asyncio.sleep(0.05)
