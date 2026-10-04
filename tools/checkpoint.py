@@ -25,7 +25,8 @@ def main():
     paths = [root / ".gitignore", root / "pyproject.toml", root / "README.md", root / "TODO.md"]
     for directory in ("src", "tests", "tools", "examples"):
         paths.extend(p for p in (root / directory).rglob("*") if p.is_file()
-                     and "__pycache__" not in p.parts and p.suffix != ".pyc")
+                     and "__pycache__" not in p.parts and p.suffix != ".pyc"
+                     and not any(part.endswith(".egg-info") for part in p.parts))
     current = {p.relative_to(root).as_posix(): p.read_text(encoding="utf-8")
                for p in sorted(paths) if p.exists()}
     diffs = []
@@ -38,10 +39,11 @@ def main():
             diffs.append("new file mode 100644\n")
         elif name not in current:
             diffs.append("deleted file mode 100644\n")
-        diffs.extend(difflib.unified_diff(
+        for line in difflib.unified_diff(
             before.splitlines(keepends=True), after.splitlines(keepends=True),
             fromfile=f"a/{name}" if name in previous else "/dev/null",
-            tofile=f"b/{name}" if name in current else "/dev/null"))
+            tofile=f"b/{name}" if name in current else "/dev/null"):
+            diffs.append(line if line.endswith("\n") else line + "\n\\ No newline at end of file\n")
     if not diffs:
         raise SystemExit("No changes since the previous checkpoint.")
     number = len(list(output.glob("*.patch"))) + 1
@@ -56,6 +58,8 @@ def main():
     destination = output / f"{number:02d}.patch"
     destination.write_text(patch, encoding="utf-8", newline="\n")
     state.write_text(json.dumps(current, ensure_ascii=False), encoding="utf-8")
+    (output / f"{number:02d}.snapshot.json").write_text(
+        json.dumps(current, ensure_ascii=False), encoding="utf-8")
     print(destination.relative_to(root))
 
 
