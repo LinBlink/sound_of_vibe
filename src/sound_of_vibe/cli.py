@@ -10,7 +10,7 @@ from . import __version__
 from .rules import Narrator
 from .runner import build_command, consume_process, expand_windows_shim, replay, resolve_executable
 from .speech import DEFAULT_VOICES, EdgeSpeech, Speaker
-from . import hook_config
+from . import hook_config, codex_hook_config
 
 
 def rate_value(value: str) -> str:
@@ -23,10 +23,11 @@ def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description="Chinese / English progress narration for Codex and Kimi CLI")
     result.add_argument("--version", action="version", version=__version__)
     commands = result.add_subparsers(dest="command", required=True)
-    hooks = commands.add_parser("hooks", help="Enable automatic voice narration for plain kimi")
+    hooks = commands.add_parser("hooks", help="Enable automatic voice narration for plain kimi or codex")
     actions = hooks.add_subparsers(dest="hook_action", required=True)
     for name in ("install", "disable", "status"):
         sub = actions.add_parser(name)
+        sub.add_argument("--source", choices=("kimi", "codex"), default="kimi")
         sub.add_argument("--config", type=Path, help="Alternate Kimi config.toml path")
         sub.add_argument("--state-dir", type=Path, help="Alternate narration state directory")
         if name == "install":
@@ -56,14 +57,15 @@ def parser() -> argparse.ArgumentParser:
 async def execute(args, extra: list[str]) -> int:
     if args.command == "hooks":
         import json
+        manager = codex_hook_config if args.source == "codex" else hook_config
         if args.hook_action == "install":
-            result = hook_config.install(args.config, args.state_dir, args.language,
+            result = manager.install(args.config, args.state_dir, args.language,
                                          {"zh": args.voice_zh, "en": args.voice_en}, args.rate,
                                          text_only=args.text_only)
         elif args.hook_action == "disable":
-            result = hook_config.disable(args.config, args.state_dir)
+            result = manager.disable(args.config, args.state_dir)
         else:
-            result = hook_config.status(args.config, args.state_dir)
+            result = manager.status(args.config, args.state_dir)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     command = None

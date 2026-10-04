@@ -42,8 +42,8 @@ def remove_block(content: str) -> str:
     return content[:start] + content[end:]
 
 
-def hook_command(python: Path, state: Path) -> str:
-    arguments = [str(python.resolve()), "-m", "sound_of_vibe.kimi_hooks", "receive",
+def hook_command(python: Path, state: Path, module: str = "sound_of_vibe.kimi_hooks") -> str:
+    arguments = [str(python.resolve()), "-m", module, "receive",
                  "--state-dir", str(state.resolve())]
     if os.name == "nt":
         # Hooks use cmd.exe on Windows. Reject cmd expansion characters rather
@@ -145,9 +145,16 @@ def status(config: Path | None = None, state: Path | None = None) -> dict:
     state = state or state_directory()
     content = config.read_text(encoding="utf-8") if config.exists() else ""
     enabled = BEGIN in content and END in content
+    result = daemon_status(state)
+    result["config"] = str(config)
+    result["enabled"] = enabled and result["enabled"]
+    return result
+
+
+def daemon_status(state: Path) -> dict:
     settings_path = state / "settings.json"
     settings = json.loads(settings_path.read_text(encoding="utf-8")) if settings_path.exists() else {}
-    result = {"enabled": enabled and settings.get("enabled", False), "config": str(config),
+    result = {"enabled": settings.get("enabled", False),
               "state": str(state), "log": str(state / "worker.log"),
               "language": settings.get("language", "auto"), "worker_active": False}
     database = state / "events.sqlite3"

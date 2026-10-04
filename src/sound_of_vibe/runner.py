@@ -97,9 +97,8 @@ async def consume_process(command: list[str], source: str, prompt: str,
         job = WindowsJob()
     try:
         environment = os.environ.copy()
-        if source == "kimi":
-            # The wrapper already narrates JSONL; suppress only our global hooks.
-            environment["SOUND_OF_VIBE_DISABLED"] = "1"
+        # The wrapper already narrates JSONL; suppress only our global hooks.
+        environment["SOUND_OF_VIBE_DISABLED"] = "1"
         process = await asyncio.create_subprocess_exec(
             *command, cwd=cwd, stdin=asyncio.subprocess.PIPE if source == "codex" else asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=environment, **options,

@@ -21,6 +21,7 @@ from pathlib import Path
 from .adapters import as_arguments
 from .models import Event, Narration
 from .kimi_transcript import WireTail, find_wire
+from .codex_transcript import RolloutTail, find_rollout
 from .rules import Narrator, classify_tool, detect_language
 from .speech import DEFAULT_VOICES, EdgeSpeech, Speaker
 
@@ -220,8 +221,14 @@ class HookNarrator:
         self.clock = clock
         self.active: dict[str, tuple[float, str]] = {}
         self.streams: dict[str, WireTail] = {}
+        self.awaiting_rollouts: set[str] = set()
 
     def poll_text(self, session: str | None = None):
+        for identity in list(self.awaiting_rollouts):
+            path = find_rollout(identity)
+            if path is not None:
+                self.streams[identity] = RolloutTail(path, 0)
+                self.awaiting_rollouts.discard(identity)
         for identity, tail in list(self.streams.items()):
             if session is not None and session != identity:
                 continue
@@ -232,7 +239,10 @@ class HookNarrator:
                 for narration in narrator.consume(event):
                     self.current_session = identity
                     self.speaker.submit(replace(narration, session=identity))
-                    self.active[identity] = (self.clock() + PROGRESS_SECONDS, "working")
+                    if event.terminal:
+                        self.active.pop(identity, None)
+                    else:
+                        self.active[identity] = (self.clock() + PROGRESS_SECONDS, "working")
 
     def new_narrator(self, language: str | None = None) -> Narrator:
         narrator = Narrator(language=self.language, clock=self.clock, dedup_seconds=5)
@@ -262,6 +272,7 @@ class HookNarrator:
         session, kind = event["session"], event["kind"]
         self.poll_text(session)
         if kind == "SessionEnd":
+            self.awaiting_rollouts.discard(session)
             self.streams.pop(session, None)
             self.active.pop(session, None)
             self.sessions.pop(session, None)
@@ -292,12 +303,17 @@ class HookNarrator:
             narrator = self.new_narrator()
             self.sessions[session] = narrator
         if kind in {"SessionStart", "TurnStarted"} and "wire_path" in event:
-            self.streams[session] = WireTail(Path(event["wire_path"]), event["wire_offset"])
+            factory = RolloutTail if event.get("stream_source") == "codex" else WireTail
+            self.streams[session] = factory(Path(event["wire_path"]), event["wire_offset"])
+            self.awaiting_rollouts.discard(session)
+        elif event.get("await_rollout"):
+            self.awaiting_rollouts.add(session)
         if len(self.sessions) > 256:
             oldest, _ = self.sessions.popitem(last=False)
             self.turns.pop(oldest, None)
             self.active.pop(oldest, None)
             self.streams.pop(oldest, None)
+            self.awaiting_rollouts.discard(oldest)
         if kind == "PreToolUse":
             self.active[session] = (self.clock() + PROGRESS_SECONDS, "tool_wait")
             source = Event("kimi-hook", event["id"], event["action"])
@@ -347,7 +363,8 @@ async def worker(directory: Path, token: str, idle_seconds: float = IDLE_SECONDS
                 await narrator.feed(event)
             narrator.poll_text()
             narrator.tick()
-            if not events and time.monotonic() - last_event > idle_seconds:
+            limit = settings.get("active_idle_seconds", idle_seconds) if narrator.active else idle_seconds
+            if not events and time.monotonic() - last_event > limit:
                 # Audio is normally already finished before the idle timeout.
                 break
             await asyncio.sleep(0.15)

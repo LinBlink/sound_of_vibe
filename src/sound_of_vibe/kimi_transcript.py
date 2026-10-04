@@ -93,11 +93,12 @@ class WireAdapter:
 
 
 class WireTail:
-    def __init__(self, path: Path, offset: int):
+    def __init__(self, path: Path, offset: int, adapter_factory=WireAdapter):
         self.path = path
         self.offset = offset
         self.decoder = JsonlDecoder()
-        self.adapter = WireAdapter()
+        self.adapter_factory = adapter_factory
+        self.adapter = adapter_factory()
 
     def poll(self) -> list[Event]:
         try:
@@ -105,7 +106,7 @@ class WireTail:
                 # A rewritten/compacted journal is history, not new commentary.
                 self.offset = self.path.stat().st_size
                 self.decoder = JsonlDecoder()
-                self.adapter = WireAdapter()
+                self.adapter = self.adapter_factory()
                 return []
             with self.path.open("rb") as stream:
                 stream.seek(self.offset)
