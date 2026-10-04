@@ -3,6 +3,7 @@
 import asyncio
 import os
 import tempfile
+from collections import deque
 from collections.abc import Callable
 from pathlib import Path
 
@@ -84,12 +85,14 @@ class Speaker:
 
     def __init__(self, backend: EdgeSpeech | None,
                  output: Callable[[Narration], None], diagnostic: Callable[[str], None],
-                 interval: float = 3, continuous: bool = False):
+                 interval: float = 3, continuous: bool = False, preserve_progress: bool = False):
         self.backend = backend
         self.output = output
         self.diagnostic = diagnostic
         self.interval = interval
         self.continuous = continuous
+        self.preserve_progress = preserve_progress
+        self.backlog: deque[Narration] = deque()
         self.pending: Narration | None = None
         self.wake = asyncio.Event()
         self.generation = 0
@@ -102,7 +105,14 @@ class Speaker:
             return
         self.output(narration)
         self.terminal = narration.terminal
-        self.pending = narration
+        if self.preserve_progress and self.pending is not None:
+            # Preserve the next action, plus the two most recent updates. A
+            # completion must follow progress rather than overwrite all of it.
+            if len(self.backlog) >= 2:
+                self.backlog.popleft()
+            self.backlog.append(narration)
+        else:
+            self.pending = narration
         self.generation += 1
         self.wake.set()
         if self.task is None:
@@ -138,11 +148,14 @@ class Speaker:
             if self.backend is not None:
                 try:
                     last_started = loop.time()
-                    await self.backend.speak(narration, lambda: generation != self.generation)
+                    await self.backend.speak(narration, lambda: not self.preserve_progress and generation != self.generation)
                 except asyncio.CancelledError:
                     raise
                 except Exception as error:
                     self.diagnostic(f"Speech failed; continuing with text ({type(error).__name__}).")
+            if self.preserve_progress and self.pending is None and self.backlog:
+                self.pending = self.backlog.popleft()
+                self.wake.set()
             if self.closed and self.pending is None:
                 return
 
@@ -163,6 +176,7 @@ class Speaker:
     async def interrupt(self):
         """Stop this utterance immediately, retaining the reusable speaker."""
         self.pending = None
+        self.backlog.clear()
         self.generation += 1
         self.wake.clear()
         if self.task:

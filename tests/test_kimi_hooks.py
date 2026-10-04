@@ -103,7 +103,8 @@ class HookAsyncTests(unittest.IsolatedAsyncioTestCase):
             await narrator.feed(normalize_hook(payload))
         await speaker.close()
         self.assertEqual([(n.language, n.action) for n in spoken],
-                         [("en", "read"), ("en", "complete"), ("zh", "search"), ("zh", "complete")])
+                         [("en", "start"), ("en", "read"), ("en", "complete"),
+                          ("zh", "start"), ("zh", "search"), ("zh", "complete")])
 
     async def test_interrupt_stops_current_and_next_turn_can_continue(self):
         output = []
@@ -115,7 +116,7 @@ class HookAsyncTests(unittest.IsolatedAsyncioTestCase):
                       hook("PreToolUse", tool_name="Read"), hook("Stop")]:
             await narrator.feed(normalize_hook(event))
         await speaker.close()
-        self.assertEqual([n.action for n in output], ["read", "read", "complete"])
+        self.assertEqual([n.action for n in output], ["start", "read", "start", "read", "complete"])
 
     async def test_sessions_are_isolated_and_session_end_keeps_last_completion(self):
         output = []
@@ -127,8 +128,64 @@ class HookAsyncTests(unittest.IsolatedAsyncioTestCase):
                         hook("PreToolUse", "B", tool_name="Read"), hook("Stop", "B"), hook("SessionEnd", "B")]:
             await narrator.feed(normalize_hook(payload))
         await speaker.close()
-        self.assertEqual([(n.language, n.action) for n in output], [("zh", "read"), ("en", "read"), ("en", "complete")])
+        self.assertEqual([(n.language, n.action) for n in output],
+                         [("zh", "start"), ("en", "start"), ("zh", "read"), ("en", "read"), ("en", "complete")])
         self.assertNotIn("B", narrator.sessions)
+
+    async def test_repeated_tools_resume_after_five_seconds(self):
+        now = [0]
+        output = []
+        speaker = Speaker(None, output.append, self.fail, continuous=True)
+        narrator = HookNarrator(speaker, clock=lambda: now[0])
+        await narrator.feed(normalize_hook(hook("TurnStarted", prompt="查看文件", turn_id="1")))
+        for timestamp in (0, 3, 6):
+            now[0] = timestamp
+            await narrator.feed(normalize_hook(hook("PreToolUse", tool_name="Read")))
+        await speaker.close()
+        self.assertEqual([n.action for n in output], ["start", "read", "read"])
+
+    async def test_heartbeat_reports_work_and_approval_only_during_active_turn(self):
+        now = [0]
+        output = []
+        speaker = Speaker(None, output.append, self.fail, continuous=True)
+        narrator = HookNarrator(speaker, clock=lambda: now[0])
+        await narrator.feed(normalize_hook(hook("TurnStarted", prompt="Inspect files", turn_id="1")))
+        now[0] = 12
+        narrator.tick()
+        await narrator.feed(normalize_hook(hook("PreToolUse", tool_name="Read")))
+        now[0] = 24
+        narrator.tick()
+        await narrator.feed(normalize_hook(hook("PermissionRequest", tool_name="Read")))
+        now[0] = 36
+        narrator.tick()
+        await narrator.feed(normalize_hook(hook("PermissionResult", tool_name="Read")))
+        await narrator.feed(normalize_hook(hook("PostToolUse", tool_name="Read")))
+        await narrator.feed(normalize_hook(hook("Stop")))
+        now[0] = 100
+        narrator.tick()
+        await speaker.close()
+        self.assertEqual([n.action for n in output], ["start", "working", "read", "tool_wait",
+                         "permission", "permission", "permission_result", "read_result", "complete"])
+        self.assertEqual(narrator.active, {})
+
+    async def test_failed_tool_does_not_claim_success_and_interrupt_stops_reminders(self):
+        now = [0]
+        output = []
+        speaker = Speaker(None, output.append, self.fail, continuous=True)
+        narrator = HookNarrator(speaker, clock=lambda: now[0])
+        for payload in [hook("TurnStarted", prompt="运行测试", turn_id="1"),
+                        hook("PostToolUseFailure", tool_name="Bash", tool_input={"command": "pytest"}),
+                        hook("Interrupt")]:
+            await narrator.feed(normalize_hook(payload))
+        now[0] = 100
+        narrator.tick()
+        await speaker.close()
+        self.assertEqual([n.action for n in output], ["start", "tool_failed"])
+
+    def test_result_normalization_ignores_tool_output(self):
+        event = normalize_hook(hook("PostToolUse", tool_name="Read", tool_output="PRIVATE_RESULT"))
+        self.assertEqual(event["action"], "read")
+        self.assertNotIn("PRIVATE_RESULT", json.dumps(event))
 
     async def test_worker_drains_queue_releases_lease_and_logs_without_network(self):
         with tempfile.TemporaryDirectory() as temporary:

@@ -33,6 +33,45 @@ def utterance(text, terminal=False):
 
 
 class SpeakerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_preserved_actions_are_not_cancelled_by_fast_completion(self):
+        backend = FakeSpeech()
+        stale_callbacks = []
+        original = backend.speak
+
+        async def speak(narration, stale):
+            stale_callbacks.append(stale)
+            await original(narration, stale)
+
+        backend.speak = speak
+        speaker = Speaker(backend, lambda _: None, self.fail, interval=0,
+                          continuous=True, preserve_progress=True)
+        speaker.submit(utterance("starting"))
+        await backend.started.wait()
+        speaker.submit(utterance("reading"))
+        speaker.submit(utterance("read finished"))
+        speaker.submit(utterance("complete", True))
+        self.assertFalse(stale_callbacks[0]())
+        backend.release.set()
+        await speaker.close()
+        self.assertEqual(backend.spoken, ["starting", "reading", "read finished", "complete"])
+
+    async def test_preserved_queue_is_bounded_and_interrupt_clears_it(self):
+        backend = FakeSpeech()
+        speaker = Speaker(backend, lambda _: None, self.fail, interval=0,
+                          continuous=True, preserve_progress=True)
+        speaker.submit(utterance("first"))
+        await backend.started.wait()
+        for index in range(20):
+            speaker.submit(utterance(str(index)))
+        self.assertLessEqual(len(speaker.backlog), 2)
+        await speaker.interrupt()
+        self.assertIsNone(speaker.pending)
+        self.assertEqual(len(speaker.backlog), 0)
+        backend.release.set()
+        speaker.submit(utterance("new turn"))
+        await speaker.close()
+        self.assertEqual(backend.spoken, ["first", "new turn"])
+
     async def test_latest_pending_replaces_backlog_and_terminal_supersedes(self):
         backend = FakeSpeech()
         output = []

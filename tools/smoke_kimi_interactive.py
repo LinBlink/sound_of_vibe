@@ -80,8 +80,7 @@ def main():
             previous_completions = 0
             session = None
             for language, prompt in prompts:
-                audio_marker = f"[audio/{language}] Playback completed."
-                previous_audio = new_log().count(audio_marker)
+                turn_log_offset = len(new_log())
                 process.write("\x1b[200~" + prompt + "\x1b[201~\r")
                 wait_for(lambda: new_log().count("[hook/Stop]") > previous_completions)
                 log = new_log()
@@ -94,9 +93,13 @@ def main():
                 text = "Reading files" if language == "en" else "正在查看文件"
                 if f"[voice/{language}] {text}" not in log:
                     raise AssertionError(f"Missing {language} tool narration")
-                wait_for(lambda: new_log().count(audio_marker) > previous_audio)
+                # Require playback of the actual action, its result, and the
+                # completion; a greeting/completion alone is insufficient.
+                for action in ("start", "read", "read_result", "complete"):
+                    marker = f"[audio/{language}] Playback completed. action={action}"
+                    wait_for(lambda marker=marker: marker in new_log()[turn_log_offset:])
                 previous_completions = new_log().count("[hook/Stop]")
-                print(f"Passed: {language} tool narration + audio playback, session={session}", flush=True)
+                print(f"Passed: {language} start + read + result + completion playback, session={session}", flush=True)
             process.write("/exit\r")
             wait_for(lambda: not process.isalive(), timeout=5)
             print("Interactive kimi exited normally.", flush=True)

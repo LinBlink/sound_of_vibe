@@ -148,10 +148,11 @@ class Narrator:
     """Language selection and bounded deduplication; pacing is handled by the player."""
 
     def __init__(self, prompt: str = "", language: Literal["auto", "zh", "en"] = "auto",
-                 clock: Callable[[], float] = monotonic):
+                 clock: Callable[[], float] = monotonic, dedup_seconds: float = 30):
         self.mode = language
         self.language: Language = (detect_language(prompt) or "zh") if language == "auto" else language
         self.clock = clock
+        self.dedup_seconds = dedup_seconds
         self.seen: OrderedDict[str, None] = OrderedDict()
         self.recent: dict[tuple[str, str], float] = {}
         self.ended = False
@@ -176,7 +177,7 @@ class Narrator:
         if not selected and event.action:
             selected = [Narration(TEMPLATES[event.action][self.language], self.language, event.action)]
         now = self.clock()
-        self.recent = {key: when for key, when in self.recent.items() if now - when < 30}
+        self.recent = {key: when for key, when in self.recent.items() if now - when < self.dedup_seconds}
         accepted = []
         for sentence in selected:
             key = (sentence.action, sentence.language)

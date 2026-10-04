@@ -22,10 +22,27 @@ from .models import Event, Narration
 from .rules import Narrator, classify_tool, detect_language
 from .speech import DEFAULT_VOICES, EdgeSpeech, Speaker
 
-HOOK_EVENTS = ("SessionStart", "TurnStarted", "PreToolUse", "Stop", "StopFailure", "Interrupt", "SessionEnd")
+HOOK_EVENTS = ("SessionStart", "TurnStarted", "PreToolUse", "PostToolUse", "PostToolUseFailure",
+               "PermissionRequest", "PermissionResult", "SessionHeartbeat",
+               "Stop", "StopFailure", "Interrupt", "SessionEnd")
 QUEUE_LIMIT = 512
 LEASE_SECONDS = 5
 IDLE_SECONDS = 120
+PROGRESS_SECONDS = 12
+PROGRESS_TEXT = {
+    "start": {"zh": "开始处理任务", "en": "Starting the task"},
+    "working": {"zh": "任务仍在处理中，请稍候", "en": "The task is still in progress"},
+    "tool_wait": {"zh": "仍在等待工具处理结果", "en": "Still waiting for the tool result"},
+    "permission": {"zh": "正在等待你的操作审批", "en": "Waiting for your approval"},
+    "permission_result": {"zh": "审批已结束，继续处理任务", "en": "Approval finished, continuing the task"},
+    "tool_failed": {"zh": "工具未成功执行，正在继续处理", "en": "The tool did not succeed, continuing the task"},
+    "read_result": {"zh": "文件已读取，继续处理下一步", "en": "Files read, proceeding to the next step"},
+    "search_result": {"zh": "搜索已结束，继续分析结果", "en": "Search finished, reviewing the results"},
+    "edit_result": {"zh": "文件修改操作已结束", "en": "File update operation finished"},
+    "test_result": {"zh": "测试命令已结束，继续检查结果", "en": "Test command finished, checking the results"},
+    "command_result": {"zh": "命令已结束，继续处理结果", "en": "Command finished, processing the results"},
+    "tool_result": {"zh": "工具操作已结束，继续处理任务", "en": "Tool operation finished, continuing the task"},
+}
 
 
 def state_directory() -> Path:
@@ -69,7 +86,7 @@ def normalize_hook(payload: dict) -> dict | None:
         turn = payload.get("turn_id")
         if isinstance(turn, str):
             event["turn"] = turn[:256]
-    elif kind == "PreToolUse":
+    elif kind in {"PreToolUse", "PostToolUse", "PostToolUseFailure"}:
         event["action"] = classify_tool(str(payload.get("tool_name", "")), as_arguments(payload.get("tool_input")))
         tool_id = payload.get("tool_call_id") or payload.get("tool_use_id")
         if isinstance(tool_id, str):
@@ -182,31 +199,53 @@ class LoggedSpeech(EdgeSpeech):
     async def speak(self, narration, stale):
         played = await super().speak(narration, stale)
         if played:
-            log(self.directory, f"[audio/{narration.language}] Playback completed.")
+            log(self.directory, f"[audio/{narration.language}] Playback completed. action={narration.action}")
         return played
 
 
 class HookNarrator:
-    def __init__(self, speaker: Speaker, language: str = "auto"):
+    def __init__(self, speaker: Speaker, language: str = "auto", clock=time.monotonic):
         self.speaker = speaker
         self.language = language
         self.sessions: OrderedDict[str, Narrator] = OrderedDict()
         self.turns: dict[str, str] = {}
         self.current_session: str | None = None
+        self.clock = clock
+        self.active: dict[str, tuple[float, str]] = {}
 
     def new_narrator(self, language: str | None = None) -> Narrator:
-        narrator = Narrator(language=self.language)
+        narrator = Narrator(language=self.language, clock=self.clock, dedup_seconds=5)
         if self.language == "auto" and language in {"zh", "en"}:
             narrator.language = language
         return narrator
 
+    def progress(self, session: str, narrator: Narrator, action: str, dedup: bool = False):
+        key = (action, narrator.language)
+        now = self.clock()
+        if dedup and now - narrator.recent.get(key, float("-inf")) < 5:
+            return
+        narrator.recent[key] = now
+        self.current_session = session
+        self.speaker.submit(Narration(PROGRESS_TEXT[action][narrator.language], narrator.language, action))
+
+    def tick(self):
+        """Speak only while a turn is active; never invent model reasoning."""
+        now = self.clock()
+        for session, (due, stage) in list(self.active.items()):
+            narrator = self.sessions.get(session)
+            if narrator is not None and not narrator.ended and now >= due:
+                self.progress(session, narrator, stage)
+                self.active[session] = (now + PROGRESS_SECONDS, stage)
+
     async def feed(self, event: dict):
         session, kind = event["session"], event["kind"]
         if kind == "SessionEnd":
+            self.active.pop(session, None)
             self.sessions.pop(session, None)
             self.turns.pop(session, None)
             return
         if kind == "Interrupt":
+            self.active.pop(session, None)
             if session == self.current_session:
                 await self.speaker.interrupt()
             narrator = self.sessions.get(session)
@@ -214,6 +253,8 @@ class HookNarrator:
                 narrator.ended = True
             return
         narrator = self.sessions.get(session)
+        if kind == "SessionHeartbeat":
+            return
         if kind == "TurnStarted":
             turn = event.get("turn", event["id"])
             if self.turns.get(session) == turn:
@@ -222,19 +263,30 @@ class HookNarrator:
             fallback = narrator.language if narrator else None
             narrator = self.new_narrator(event.get("language") or fallback)
             self.sessions[session] = narrator
+            self.active[session] = (self.clock() + PROGRESS_SECONDS, "working")
+            self.progress(session, narrator, "start")
         elif narrator is None:
             narrator = self.new_narrator()
             self.sessions[session] = narrator
-            if kind == "SessionStart":
-                self.current_session = session
-                text = "旁白已开启" if narrator.language == "zh" else "Voice narration enabled"
-                self.speaker.submit(Narration(text, narrator.language, "start"))
         if len(self.sessions) > 256:
             oldest, _ = self.sessions.popitem(last=False)
             self.turns.pop(oldest, None)
+            self.active.pop(oldest, None)
         if kind == "PreToolUse":
+            self.active[session] = (self.clock() + PROGRESS_SECONDS, "tool_wait")
             source = Event("kimi-hook", event["id"], event["action"])
+        elif kind in {"PostToolUse", "PostToolUseFailure", "PermissionRequest", "PermissionResult"}:
+            if narrator.ended:
+                return
+            stage = "permission" if kind == "PermissionRequest" else "working"
+            self.active[session] = (self.clock() + PROGRESS_SECONDS, stage)
+            action = {"PostToolUse": event.get("action", "tool") + "_result",
+                      "PostToolUseFailure": "tool_failed", "PermissionRequest": "permission",
+                      "PermissionResult": "permission_result"}[kind]
+            self.progress(session, narrator, action, dedup=True)
+            return
         elif kind in {"Stop", "StopFailure"}:
+            self.active.pop(session, None)
             source = Event("kimi-hook", event["id"], "failed" if kind == "StopFailure" else "complete", terminal=True)
         else:
             return
@@ -251,7 +303,7 @@ async def worker(directory: Path, token: str, idle_seconds: float = IDLE_SECONDS
     backend = None if settings.get("text_only", False) else LoggedSpeech(directory, settings)
     speaker = Speaker(backend,
                       lambda item: log(directory, f"[voice/{item.language}] {item.text}"),
-                      lambda message: log(directory, message), continuous=True)
+                      lambda message: log(directory, message), interval=1, continuous=True, preserve_progress=True)
     narrator = HookNarrator(speaker, settings["language"])
     last_event = time.monotonic()
     cancel = False
@@ -266,6 +318,7 @@ async def worker(directory: Path, token: str, idle_seconds: float = IDLE_SECONDS
                 last_event = time.monotonic()
                 log(directory, f"[hook/{event['kind']}] session={event['session']}")
                 await narrator.feed(event)
+            narrator.tick()
             if not events and time.monotonic() - last_event > idle_seconds:
                 # Audio is normally already finished before the idle timeout.
                 break
