@@ -36,7 +36,9 @@ class ProcessTests(unittest.IsolatedAsyncioTestCase):
             handle = kernel.OpenProcess(0x100000, False, pid)
             if handle:
                 try:
-                    self.assertEqual(kernel.WaitForSingleObject(handle, 0), 0)
+                    # Closing a kill-on-close job requests termination; Windows
+                    # can signal a descendant just after the parent exits.
+                    self.assertEqual(kernel.WaitForSingleObject(handle, 2000), 0)
                 finally:
                     kernel.CloseHandle(handle)
             else:

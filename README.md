@@ -7,7 +7,7 @@ CLI JSONL → event adapter → bilingual progress rules → language / deduplic
           → latest-progress queue → Edge TTS → audio playback
 ```
 
-首版是 Windows 优先的单次任务包装器。使用规则识别已有进度文字，并根据工具动作生成简短旁白，不额外调用总结或翻译模型。
+支持 Kimi 全局交互旁白和 Codex / Kimi 单次任务包装器，Windows 优先。通过规则或工具动作生成简短旁白，不额外调用总结或翻译模型。
 
 ## 安装 / Installation
 
@@ -21,6 +21,40 @@ python -m venv .venv
 当前工作区已经创建 `.venv` 并安装依赖，可以直接使用下列命令，无需激活虚拟环境。其他机器若只有 `py` 启动器，可将第一行改为 `py -3 -m venv .venv`。
 
 ## 使用 / Usage
+
+### 直接运行 Kimi，所有项目自动播放 / Global interactive Kimi
+
+本机已经全局开启。**在任意项目目录直接运行 `kimi`，输入任务即可自动播放**。已经打开的旧会话请退出后重新启动；首次输入任务创建会话时才会开始旁白。
+
+```powershell
+cd C:\path\to\project
+kimi
+```
+
+在其他机器安装依赖后，先在本仓库目录执行一次安装：
+
+```powershell
+.\.venv\Scripts\sound-of-vibe.exe hooks install
+.\.venv\Scripts\sound-of-vibe.exe hooks status
+
+# 关闭全局旁白 / Disable global narration
+.\.venv\Scripts\sound-of-vibe.exe hooks disable
+
+# 重新开启 / Re-enable
+.\.venv\Scripts\sound-of-vibe.exe hooks install
+```
+
+Run `hooks install` once, then use plain `kimi` in any project. Chinese prompts select Chinese narration; English prompts select English narration. Restart existing Kimi sessions after installation.
+
+安装会备份 `~/.kimi-code/config.toml`，仅添加带标记的 Hooks 配置，保留其他配置和已有 Hooks；关闭时仅移除本工具的配置块。原生交互界面、工具权限和审批由 Kimi 自己处理。挂钩静默返回，后台进程合成、播放音频，空闲 120 秒后退出，下次任务自动启动。
+
+**全局模式播报工具动作和完成状态**（如“正在查看文件” / “Reading files”），语言跟随每轮任务。Kimi Hooks 不提供完整助手文字流，因此此模式不会逐句朗读助手的进度原文。工具调用前的播报表示即将执行，是否批准仍由 Kimi 决定。快速进度会合并，多个会话共享一个播放队列。
+
+默认日志：`%LOCALAPPDATA%\SoundOfVibe\worker.log`，包含事件类型、会话标识、旁白和播放结果，不记录原始提示词或命令。在线 TTS 仅接收生成的旁白模板。Hooks 失败时静默跳过，不影响 Kimi 工作。
+
+配置保存了本仓库虚拟环境的绝对路径；移动仓库或重建 `.venv` 后需重新执行 `hooks install`。上述管理命令从本仓库运行；在其他目录管理时，请使用 `sound-of-vibe.exe` 的完整路径。单次任务包装器会自动避免与全局旁白重复播放。
+
+### 单次任务包装器 / Single-task wrapper
 
 ```powershell
 .\.venv\Scripts\sound-of-vibe.exe run kimi --prompt "检查项目结构"
@@ -104,7 +138,14 @@ Edge TTS 是在线服务，**只发送过滤后的旁白文字**，因此直接�
 
 Windows 使用 Job Object 管理本次启动的进程树，避免依赖全系统进程枚举；取消和正常结束都会清理本次启动的后代进程，防止继承输出管道的后台进程阻止退出。
 
-当前环境验证（2026-10-04）：32 项自动化测试通过，两个默认音色在线查询成功，中文和英文短句实际合成并完成播放。解除早期沙箱限制后，Kimi Code 2.1.1 和 Codex CLI 0.160.0 的真实只读任务均已通过：分别识别英文、中文进度，排除工具内容和最终回答，退出码为 0；启用音频的真实 CLI 联调也正常结束，没有触发文字降级。
+当前环境验证（2026-10-04）：48 项自动化测试通过，两个默认音色在线查询成功，中文和英文短句实际合成并完成播放。解除早期沙箱限制后，Kimi Code 2.1.1 和 Codex CLI 0.160.0 的真实只读任务均已通过：分别识别英文、中文进度，排除工具内容和最终回答，退出码为 0；启用音频的真实 CLI 联调也正常结束，没有触发文字降级。
+
+全局 Hooks 另验证了配置安装、关闭和重新开启，以及在独立临时项目中直接启动原生交互式 `kimi`：同一会话连续执行英文、中文只读任务，两种语音完成播放，正常退出。可选 Windows 联调脚本如下，会调用已登录的 Kimi 模型并读取脚本创建的测试 README：
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install pywinpty
+.\.venv\Scripts\python.exe tools/smoke_kimi_interactive.py
+```
 
 本机 Codex 位于 `C:\Users\wangb\AppData\Local\Programs\OpenAI\Codex\bin\codex.exe`，Kimi 位于 `C:\Users\wangb\.kimi-code\bin\kimi.exe`，当前均可从 PATH 调用。曾经的“未找到 Codex”仅代表当时进程的 PATH 查询结果，并不代表未安装。
 
@@ -118,5 +159,6 @@ Windows 使用 Job Object 管理本次启动的进程树，避免依赖全系统
 
 - [Codex non-interactive mode](https://learn.chatgpt.com/docs/non-interactive-mode)
 - [Kimi Code CLI command](https://moonshotai.github.io/kimi-code/en/reference/kimi-command.html)
+- [Kimi Code Hooks](https://moonshotai.github.io/kimi-code/en/customization/hooks)
 - [edge-tts](https://github.com/rany2/edge-tts)
 - [pygame music playback](https://www.pygame.org/docs/ref/music.html)

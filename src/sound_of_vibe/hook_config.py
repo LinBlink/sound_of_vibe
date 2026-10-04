@@ -72,7 +72,16 @@ def atomic_write(path: Path, content: str):
         temporary.write_text(content, encoding="utf-8", newline="\n")
         if path.exists():
             shutil.copymode(path, temporary)
-        temporary.replace(path)
+        # Kimi can briefly hold the config open while watching/reloading it.
+        # Keep the old file intact and retry only Windows sharing/access errors.
+        for attempt in range(8):
+            try:
+                temporary.replace(path)
+                break
+            except OSError as error:
+                if getattr(error, "winerror", None) not in (5, 32, 33) or attempt == 7:
+                    raise
+                time.sleep(min(0.05 * 2 ** attempt, 0.4))
     finally:
         temporary.unlink(missing_ok=True)
 

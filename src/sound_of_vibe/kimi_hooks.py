@@ -264,6 +264,7 @@ async def worker(directory: Path, token: str, idle_seconds: float = IDLE_SECONDS
             events = queue.take()
             for event in events:
                 last_event = time.monotonic()
+                log(directory, f"[hook/{event['kind']}] session={event['session']}")
                 await narrator.feed(event)
             if not events and time.monotonic() - last_event > idle_seconds:
                 # Audio is normally already finished before the idle timeout.
