@@ -89,7 +89,8 @@ async def consume_process(command: list[str], source: str, prompt: str,
     stdout = stdout if stdout is not None else sys.stdout
     stderr = stderr if stderr is not None else sys.stderr
     diagnostic = diagnostic or (lambda message: print(message, file=stderr, flush=True))
-    options = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt" else {"start_new_session": True}
+    # Attach before any agent code can spawn descendants (CREATE_SUSPENDED).
+    options = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | 0x4} if os.name == "nt" else {"start_new_session": True}
     job = None
     if os.name == "nt":
         from .windows_job import WindowsJob
@@ -110,8 +111,9 @@ async def consume_process(command: list[str], source: str, prompt: str,
     try:
         if job:
             job.attach(process.pid)
+            job.resume(process.pid)
     except OSError:
-        await stop_process(process)
+        await stop_process(process, job)
         job.close()
         raise
     adapter = adapter_for(source)

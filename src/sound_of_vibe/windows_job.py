@@ -68,3 +68,48 @@ class WindowsJob:
         if self.handle:
             self.kernel.CloseHandle(self.handle)
             self.handle = None
+
+    def resume(self, pid: int):
+        """Resume only the primary thread of our newly suspended process.
+
+        CPython closes CreateProcess's initial thread handle, so locate that
+        thread by its owner PID. Never suspend or resume another process.
+        """
+        class ThreadEntry(ctypes.Structure):
+            _fields_ = [("dwSize", wintypes.DWORD), ("cntUsage", wintypes.DWORD),
+                        ("th32ThreadID", wintypes.DWORD), ("th32OwnerProcessID", wintypes.DWORD),
+                        ("tpBasePri", wintypes.LONG), ("tpDeltaPri", wintypes.LONG),
+                        ("dwFlags", wintypes.DWORD)]
+
+        self.kernel.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+        self.kernel.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+        for name in ("Thread32First", "Thread32Next"):
+            function = getattr(self.kernel, name)
+            function.argtypes = [wintypes.HANDLE, ctypes.POINTER(ThreadEntry)]
+            function.restype = wintypes.BOOL
+        self.kernel.OpenThread.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        self.kernel.OpenThread.restype = wintypes.HANDLE
+        self.kernel.ResumeThread.argtypes = [wintypes.HANDLE]
+        self.kernel.ResumeThread.restype = wintypes.DWORD
+        snapshot = self.kernel.CreateToolhelp32Snapshot(0x4, 0)  # TH32CS_SNAPTHREAD
+        if snapshot == wintypes.HANDLE(-1).value:
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            entry = ThreadEntry()
+            entry.dwSize = ctypes.sizeof(entry)
+            present = self.kernel.Thread32First(snapshot, ctypes.byref(entry))
+            while present:
+                if entry.th32OwnerProcessID == pid:
+                    thread = self.kernel.OpenThread(0x2, False, entry.th32ThreadID)
+                    if not thread:
+                        raise ctypes.WinError(ctypes.get_last_error())
+                    try:
+                        if self.kernel.ResumeThread(thread) == 0xFFFFFFFF:
+                            raise ctypes.WinError(ctypes.get_last_error())
+                        return
+                    finally:
+                        self.kernel.CloseHandle(thread)
+                present = self.kernel.Thread32Next(snapshot, ctypes.byref(entry))
+            raise OSError("Suspended agent thread was not found")
+        finally:
+            self.kernel.CloseHandle(snapshot)

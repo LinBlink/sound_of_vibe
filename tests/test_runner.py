@@ -67,7 +67,7 @@ class ProcessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, 0)
         self.assertEqual(output.encode(), payload)
         self.assertEqual(len(errors), 300000)
-        self.assertEqual([s.text for s in spoken], ["我先查看文件。", "任务已完成"])
+        self.assertEqual([s.text for s in spoken], ["我先查看文件。", "正在查看文件", "任务已完成"])
         self.assertEqual(diagnostics, [])
 
     async def test_failure_exit_code_and_malformed_json(self):
