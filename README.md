@@ -21,6 +21,34 @@ python -m venv .venv
 
 当前工作区已经创建 `.venv`、安装依赖及本地中英文 TTS 模型，可以直接使用下列命令，无需激活虚拟环境。其他机器若只有 `py` 启动器，可将第一行改为 `py -3 -m venv .venv`。
 
+## Windows 托盘程序 / Windows tray app
+
+本机已生成可双击的 `dist\SoundOfVibe\SoundOfVibe.exe`，启动后在通知区域显示紫色图标；重复启动不会创建第二个托盘。右键菜单可启动/停止播报、静音、调整语速及音量、打开控制面板或日志，并选择登录时启动。双击图标打开控制面板，可分别控制 Kimi、Codex 或两者，选择音色并试听。
+
+- 音量（0–100%）和静音即时影响当前人声及提示音。
+- 语速（-50% 至 +100%）自动保存，从下一句生效，无需重启；自适应追赶仍遵守设置的上限。
+- 停止服务立即中断播报并清空待播事件，不终止 Kimi/Codex 的任务；启动后从下一个任务回合继续。退出托盘也会停止播报。
+- 已安装的全局 Hooks 和音色选择保持保存；登录启动可在菜单中自行勾选。
+
+The Windows tray menu controls narration, mute, rate, volume, the settings panel, logs and optional sign-in startup. Volume and mute affect current playback; rate applies to the next utterance. Stopping clears queued narration while CLI tasks continue. Exiting the tray stops narration too.
+
+从源码启动 / Start from source:
+
+```powershell
+.\.venv\Scripts\sound-of-vibe.exe tray
+```
+
+生成 Windows 程序 / Build the Windows app:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -e ".[windows-build]"
+.\.venv\Scripts\python.exe tools/build_windows.py
+```
+
+分发时保留整个 `dist\SoundOfVibe` 文件夹，包括 `_internal`；本地 TTS 模型仍使用用户目录下的缓存。另一台机器须安装模型和 CLI Hooks，Codex 的 Hooks 仍需原生信任。托盘日志位于 `%LOCALAPPDATA%\SoundOfVibe\tray.log`。
+
+Keep the entire output directory, including `_internal`. Models are stored in the user cache. Other machines need model and CLI hook installation, including native Codex hook trust.
+
 ## 使用 / Usage
 
 ### 直接运行 Kimi，所有项目自动播放 / Global interactive Kimi
@@ -87,7 +115,7 @@ Only owned handlers in `~/.codex/hooks.json` are managed. Other hooks and `confi
 
 自动打开本地音色页：分别选择中文、英文音色，点击试听，再保存到 Kimi、Codex 或两者。也可以试听“完成”和“需要回答”两种叮咚。保持命令运行以使用页面，Ctrl+C 关闭服务；`--no-browser` 只打印访问地址。页面仅绑定 `127.0.0.1`，保存不修改 Hooks 命令，也不启用原本关闭的 Hooks。
 
-本地音色列表提供 174 个中文基础说话人、109 个英文基础说话人。中文每个说话人有低音、标准、高音三种机械配置（160 / 190 / 220 Hz），共 522 种配置；它们是音高变体，不是 522 个不同说话人。原始模型未提供可靠的性别元数据，页面标为“未标注”，请以试听选择。旧 Edge 音色 ID 会迁移到本地首选音色，已开启的自动会话分配继续使用不同音色。
+本地音色列表提供 174 个中文基础说话人、109 个英文基础说话人。中文每个说话人有低音、标准、高音三种机械配置（原生中心音高的 90% / 100% / 110%），共 522 种配置；它们是音高变体，不是 522 个不同说话人。原始模型未提供可靠的性别元数据，页面标为“未标注”，请以试听选择。旧 Edge 音色 ID 会迁移到本地首选音色，已开启的自动会话分配继续使用不同音色。
 
 The offline catalog provides 174 Chinese speakers (522 pitch profiles) and 109 English speakers. Gender metadata is unspecified. Previews and narration use the same local engine and mechanical processing. Existing Edge voice preferences migrate to local defaults; select new voices on this page.
 
@@ -103,7 +131,7 @@ Continuous playback adds no sentence delay. The next queued utterance is synthes
 
 正常会话关闭且待播句子播放完毕后释放音色；异常退出留下的分配在 24 小时未使用后回收。可用音色数量有限，耗尽时保留文字并记录失败，不偷偷重复使用已占用音色。中文模型使用普通话语料，英文使用 VCTK 多说话人语料；可试听选择。工作会话闲置超过 24 小时后恢复，可能重新分配。
 
-人声使用本地固定音高重合成，标准配置 190 Hz，统一音量峰值，不添加情感风格；试听与正式播放使用同一处理。默认中文 `local:zh:066`、英文 `local:en:000`，基础语速 `+0%`。处理会削弱中文声调，无法保证消除所有主观情绪感知。中文句子中的 FastAPI、Python 等英文术语转交本地英文模型朗读，避免被中文模型丢掉。
+人声使用本地平直音高重合成，标准配置保留各自原生中心音高，统一音量峰值，不添加情感风格；试听与正式播放使用同一处理。默认中文 `local:zh:066`、英文 `local:en:000`，基础语速 `+0%`。处理会削弱中文声调，无法保证消除所有主观情绪感知。中文句子中的 FastAPI、Python 等英文术语转交本地英文模型朗读，避免被中文模型丢掉。
 
 任务结束等待输入时，播放完成叮咚；调用 `request_user_input` / AskUser 类工具、请求审批，或最终可见文字明确提出问题时，播放另一种叮咚。完成提示排在执行旁白后，同一回合不会被重复 Stop 事件重播。问题识别只读取可见文字，不播报最终答案。没有问号的隐含疑问不保证识别。
 
@@ -202,7 +230,7 @@ Kimi 使用 `--prompt --output-format stream-json`；此模式按 Kimi 自身规
 
 Windows 使用 Job Object 管理本次启动的进程树，避免依赖全系统进程枚举；取消和正常结束都会清理本次启动的后代进程，防止继承输出管道的后台进程阻止退出。
 
-当前环境验证（2026-10-04）：90 项自动化测试通过，两个默认音色在线查询成功，中文和英文短句实际合成并完成播放。解除早期沙箱限制后，Kimi Code 2.1.1 和 Codex CLI 0.160.0 的真实只读任务均已通过：分别识别英文、中文进度，排除工具内容和最终回答，退出码为 0；启用音频的真实 CLI 联调也正常结束，没有触发文字降级。
+当前环境验证（2026-10-05）：106 项自动化测试通过；禁止网络连接的本地中英文合成、混合术语及实际播放通过。Windows 打包程序已验证托盘启动、服务停止/重启、音量与语速保存及中英文试听。此前两个默认在线音色也曾完成实际合成播放。解除早期沙箱限制后，Kimi Code 2.1.1 和 Codex CLI 0.160.0 的真实只读任务均已通过：分别识别英文、中文进度，排除工具内容和最终回答，退出码为 0；启用音频的真实 CLI 联调也正常结束，没有触发文字降级。
 
 全局 Hooks 另验证了配置安装、关闭和重新开启，以及在独立临时项目中直接启动原生交互式 `kimi`：同一会话连续执行英文、中文只读任务，两种语言的开始、读取、工具结果、完成提示音依次完成播放。18 秒只等待和打印的命令运行期间，此前验证了等待工具结果的提示；按当前偏好，这类提示现在只记录日志，随后正常退出。可选 Windows 联调脚本如下，会调用已登录的 CLI 模型并读取脚本创建的测试 README：
 
