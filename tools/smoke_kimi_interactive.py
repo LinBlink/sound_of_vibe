@@ -114,7 +114,8 @@ def main():
                 actions = ("commentary", "complete") if arguments.commentary else ("start", "read", "read_result", "complete")
                 for action in actions:
                     marker = f"[audio/{language}] Playback completed. action={action} session={session}"
-                    wait_for(lambda marker=marker: marker in new_log()[turn_log_offset:])
+                    wait_for(lambda marker=marker: marker in new_log()[turn_log_offset:],
+                             timeout=180 if arguments.commentary else 90)
                 turn_log = new_log()[turn_log_offset:]
                 positions = [turn_log.index(f"[audio/{language}] Playback completed. action={action} session={session}")
                              for action in actions]
@@ -142,9 +143,11 @@ def main():
                 prompt = ('Use Bash to run exactly python -c "import time; time.sleep(18); print(123)". '
                           'This only waits and prints; do not write files. Wait for the result, then answer only 123.')
                 process.write("\x1b[200~" + prompt + "\x1b[201~\r")
-                wait_for(lambda: f"[audio/en] Playback completed. action=tool_wait session={session}" in new_log()[offset:], timeout=60)
-                wait_for(lambda: f"[audio/en] Playback completed. action=complete session={session}" in new_log()[offset:], timeout=60)
-                print("Passed: in-progress audio during a long tool call.", flush=True)
+                wait_for(lambda: f"[voice/en] Still waiting for the tool result session={session}" in new_log()[offset:], timeout=60)
+                wait_for(lambda: f"[audio/en] Playback completed. action=complete session={session}" in new_log()[offset:], timeout=180)
+                if f"[audio/en] Playback completed. action=tool_wait session={session}" in new_log()[offset:]:
+                    raise AssertionError("Generic waiting reminders must stay silent")
+                print("Passed: waiting reminder logged without human speech during a long tool call.", flush=True)
             process.write("/exit\r")
             wait_for(lambda: not process.isalive(), timeout=5)
             print("Interactive kimi exited normally.", flush=True)

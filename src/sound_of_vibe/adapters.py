@@ -27,6 +27,15 @@ def as_arguments(value) -> dict:
         return {}
 
 
+def kimi_visible_think(content) -> str:
+    """Think parts published by the Kimi CLI protocol, never opaque payloads."""
+    if not isinstance(content, list):
+        return ""
+    return "\n".join(part.get("think", part.get("text", "")) for part in content
+                     if isinstance(part, dict) and part.get("type") == "think"
+                     and isinstance(part.get("think", part.get("text", "")), str))
+
+
 class KimiAdapter:
     source = "kimi"
 
@@ -47,10 +56,13 @@ class KimiAdapter:
         event_id = str(message.get("id") or hashlib.sha256(
             json.dumps(message, sort_keys=True, ensure_ascii=False).encode()).hexdigest())
         text = as_text(message.get("content"))
-        result = []
+        thought = kimi_visible_think(message.get("content"))
+        if isinstance(message.get("reasoning_content"), str):
+            thought = thought or message["reasoning_content"]
+        result = [Event(self.source, event_id + ":think", "commentary", thought)] if thought else []
         if isinstance(calls, list) and calls:
             if self.pending:
-                result.append(self.pending)
+                result.insert(0, self.pending)
                 self.pending = None
             if text:
                 result.append(Event(self.source, event_id + ":text", "commentary", text=text))
@@ -93,6 +105,10 @@ class CodexAdapter:
         item_id = str(item.get("id") or hashlib.sha256(
             json.dumps(item, sort_keys=True).encode()).hexdigest())
         item_type = item.get("type")
+        if item_type == "reasoning" and kind == "item.completed":
+            # Codex exec's ReasoningItem.text is its public reasoning summary.
+            text = item.get("text")
+            return [Event(self.source, item_id + ":think", "commentary", text)] if isinstance(text, str) and text else []
         if item_type == "agent_message" and kind == "item.completed":
             phase = item.get("phase")
             event = Event(self.source, item_id + ":text", "commentary", text=as_text(item.get("text")))

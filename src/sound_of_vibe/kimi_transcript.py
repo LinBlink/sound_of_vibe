@@ -4,7 +4,7 @@ import os
 import re
 from pathlib import Path
 
-from .adapters import as_text
+from .adapters import as_text, kimi_visible_think
 from .models import Event
 from .stream import JsonlDecoder
 from .rules import asks_user
@@ -25,6 +25,16 @@ class WireAdapter:
         self.live = False
         self.parts: list[str] = []
         self.step_id = ""
+        self.think_parts: list[str] = []
+        self.think_sequence = 0
+
+    def flush_think(self) -> list[Event]:
+        text = "".join(self.think_parts)
+        self.think_parts.clear()
+        if not text:
+            return []
+        self.think_sequence += 1
+        return [Event("kimi-wire", self.step_id + f":think:{self.think_sequence}", "commentary", text)]
 
     def flush_parts(self) -> list[Event]:
         text = "".join(self.parts)
@@ -35,6 +45,7 @@ class WireAdapter:
         if record.get("type") in {"agent.turn.ended", "turn.ended", "turn.prompt"}:
             self.pending = None
             self.parts.clear()
+            self.think_parts.clear()
             if record.get("type") == "turn.prompt":
                 self.live = False
             return []
@@ -46,23 +57,32 @@ class WireAdapter:
             kind = event.get("type")
             if kind == "step.begin":
                 self.parts.clear()
+                self.think_parts.clear()
                 self.step_id = str(event.get("uuid"))
             elif kind == "content.part":
                 self.step_id = str(event.get("stepUuid") or self.step_id)
                 part = event.get("part", {})
                 if isinstance(part, dict) and part.get("type") in {"text", "output_text"}:
+                    thoughts = self.flush_think()
                     text = part.get("text")
                     if isinstance(text, str):
                         self.parts.append(text)
+                    return thoughts
+                if isinstance(part, dict) and part.get("type") == "think":
+                    text = part.get("think", part.get("text"))
+                    if isinstance(text, str):
+                        self.think_parts.append(text)
             elif kind == "tool.call":
-                return self.flush_parts()
+                return self.flush_think() + self.flush_parts()
             elif kind == "step.end":
+                thoughts = self.flush_think()
                 if event.get("finishReason") in {"tool_calls", "tool_use"}:
-                    return self.flush_parts()
+                    return thoughts + self.flush_parts()
                 question = asks_user("".join(self.parts))
                 self.parts.clear()  # Never narrate the final answer itself.
                 if question:
-                    return [Event("kimi-wire", self.step_id + ":ask", "ask", terminal=True)]
+                    return thoughts + [Event("kimi-wire", self.step_id + ":ask", "ask", terminal=True)]
+                return thoughts
             return []
         if record.get("type") != "agent.message.appended":
             return []
@@ -78,24 +98,27 @@ class WireAdapter:
             return result
         if role != "assistant" or meta.get("source") != "llm":
             return []
+        thought = kimi_visible_think(message.get("content"))
+        identity = str(meta.get("messageId") or record.get("time"))
+        thoughts = [Event("kimi-wire", identity + ":think", "commentary", thought)] if thought else []
         finish = meta.get("finish", {}).get("finishReason")
         if finish in {"completed", "stop", "end_turn"}:
             self.pending = None
             if asks_user(as_text(message.get("content"))):
-                return [Event("kimi-wire", str(meta.get("messageId")) + ":ask", "ask", terminal=True)]
-            return []
+                return thoughts + [Event("kimi-wire", str(meta.get("messageId")) + ":ask", "ask", terminal=True)]
+            return thoughts
         # as_text accepts only text/output_text parts, never think or reasoning.
         text = as_text(message.get("content"))
         event = Event("kimi-wire", str(meta.get("messageId") or record.get("time")), "commentary", text)
         if message.get("toolCalls") or finish == "tool_calls":
-            result = [self.pending] if self.pending else []
+            result = ([self.pending] if self.pending else []) + thoughts
             self.pending = None
             if text:
                 result.append(event)
             return result
         if text:
             self.pending = event
-        return []
+        return thoughts
 
 
 class WireTail:

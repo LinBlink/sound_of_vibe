@@ -119,7 +119,8 @@ class Speaker:
     def __init__(self, backend: EdgeSpeech | None,
                  output: Callable[[Narration], None], diagnostic: Callable[[str], None],
                  interval: float = 3, continuous: bool = False, preserve_progress: bool = False,
-                 max_pending: int = 3, prefer_commentary: bool = False):
+                 max_pending: int = 3, prefer_commentary: bool = False,
+                 max_commentary_pending: int = 256):
         self.backend = backend
         self.output = output
         self.diagnostic = diagnostic
@@ -128,6 +129,7 @@ class Speaker:
         self.preserve_progress = preserve_progress
         self.max_pending = max(1, max_pending)
         self.prefer_commentary = prefer_commentary
+        self.max_commentary_pending = max(self.max_pending, max_commentary_pending)
         self.backlog: deque[Narration] = deque()
         self.pending: Narration | None = None
         self.wake = asyncio.Event()
@@ -159,12 +161,23 @@ class Speaker:
             # completion must follow progress rather than overwrite all of it.
             if len(self.backlog) >= self.max_pending - 1:
                 if self.backlog:
-                    discard = next((item for item in self.backlog if item.action not in CHIME_ACTIONS and not item.terminal), None)
+                    discard = next((item for item in self.backlog if item.action not in CHIME_ACTIONS and not item.terminal
+                                    and (not self.prefer_commentary or item.action != "commentary")), None)
                     if discard:
                         self.backlog.remove(discard)
                     elif narration.action not in CHIME_ACTIONS and not narration.terminal:
-                        return
+                        if not (self.prefer_commentary and narration.action == "commentary"
+                                and len(self.backlog) < self.max_commentary_pending - 1):
+                            if narration.action == "commentary":
+                                self.diagnostic("Visible narration backlog limit reached; text retained in the log.")
+                            return
                 else:
+                    if self.prefer_commentary and self.pending.action == "commentary":
+                        if narration.action == "commentary" or narration.terminal or narration.action in CHIME_ACTIONS:
+                            self.backlog.append(narration)
+                            self.generation += 1
+                            self.wake.set()
+                        return
                     self.pending = narration
                     self.generation += 1
                     self.wake.set()

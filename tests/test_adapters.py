@@ -39,7 +39,7 @@ class AdapterTests(unittest.TestCase):
     def test_codex_phases_and_reasoning(self):
         adapter = CodexAdapter()
         self.assertEqual(adapter.feed({"type": "item.completed", "item": {
-            "id": "1", "type": "reasoning", "text": "I'll inspect the code."}}), [])
+            "id": "1", "type": "reasoning", "text": "I'll inspect the code."}})[0].text, "I'll inspect the code.")
         self.assertEqual(len(adapter.feed({"type": "item.completed", "item": {
             "id": "2", "type": "agent_message", "phase": "commentary", "text": "我先查看文件。"}})), 1)
         self.assertEqual(adapter.feed({"type": "item.completed", "item": {

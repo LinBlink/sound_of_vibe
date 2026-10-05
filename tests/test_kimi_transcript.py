@@ -13,8 +13,7 @@ EXPLANATION = "修复后，执行旁白不会再被结束提示覆盖，同类�
 
 def record(text, final=False, role="assistant", identifier="one"):
     return {"type": "agent.message.appended", "message": {
-        "message": {"role": role, "content": [{"type": "think", "think": "DO_NOT_SPEAK"},
-                    {"type": "text", "text": text}], "toolCalls": [] if final else [{"name": "Read"}]},
+        "message": {"role": role, "content": [{"type": "text", "text": text}], "toolCalls": [] if final else [{"name": "Read"}]},
         "meta": {"source": "llm", "messageId": identifier,
                  "finish": {"finishReason": "completed" if final else "tool_calls"}}}}
 
@@ -29,8 +28,8 @@ class TranscriptTests(unittest.TestCase):
         def live(event):
             return adapter.feed({"type": "context.append_loop_event", "event": event})
         self.assertEqual(live({"type": "step.begin", "uuid": "step1"}), [])
-        self.assertEqual(live({"type": "content.part", "part": {"type": "think", "think": "DO_NOT_SPEAK"}}), [])
-        self.assertEqual(live({"type": "content.part", "part": {"type": "text", "text": EXPLANATION}}), [])
+        self.assertEqual(live({"type": "content.part", "part": {"type": "think", "think": "Visible CLI think."}}), [])
+        self.assertEqual(live({"type": "content.part", "part": {"type": "text", "text": EXPLANATION}})[0].text, "Visible CLI think.")
         self.assertEqual([event.text for event in live({"type": "tool.call"})], [EXPLANATION])
         self.assertEqual(live({"type": "step.end", "finishReason": "tool_use"}), [])
         self.assertEqual(adapter.feed(record(EXPLANATION)), [])
@@ -56,7 +55,7 @@ class TranscriptTests(unittest.TestCase):
         text = '• Edited tools/test.py (+21 -3)\n+import argparse\n```python\nimport argparse\n```\n' + EXPLANATION + '\nTraceback (most recent call last):\n    raise AssertionError("failed")\n'
         self.assertEqual("".join(item.text for item in commentary_sentences(text)), EXPLANATION)
 
-    def test_wire_ignores_reasoning_tools_users_and_final_answer(self):
+    def test_wire_ignores_tools_users_and_final_answer(self):
         adapter = WireAdapter()
         self.assertEqual(adapter.feed(record("TOOL_OUTPUT", role="tool")), [])
         self.assertEqual(adapter.feed(record("USER_PROMPT", role="user")), [])
