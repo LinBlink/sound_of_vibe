@@ -62,6 +62,7 @@ class VoiceAssignments:
                 used = {row[index] for row in rows if row[0] != session}
                 preferred_locale = "zh-CN" if language == "zh" else "en-US"
                 candidates = sorted(pools[language], key=lambda name: (name != preferred.get(language),
+                                                                      by_name[name].get("Quality") != by_name.get(preferred.get(language), {}).get("Quality"),
                                                                       by_name[name]["Locale"] != preferred_locale,
                                                                       "::" in name, name))
                 result[language] = next((name for name in candidates if name not in used), None)

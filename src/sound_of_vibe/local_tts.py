@@ -21,7 +21,10 @@ MODELS = {
     "en": {"name": "vits-piper-en_GB-vctk-medium", "file": "en_GB-vctk-medium.onnx", "speakers": 109,
            "sha256": "abafd35bdab0a72a3c6b947228ae3cccdf3624db83313c77d1abb5cbc75e1f64"},
 }
-LOCAL_VOICES = {"zh": "local:zh:066", "en": "local:en:000"}
+HQ_MODEL = {"name": "kokoro-int8-multi-lang-v1_1", "file": "model.int8.onnx", "speakers": 100,
+            "sha256": "a1e94694776049035c4f2c6529f003aaece993c76aae9a78995831c3c4dcafc6"}
+MODELS["zh_hq"] = HQ_MODEL
+LOCAL_VOICES = {"zh": "local:zh:hq003", "en": "local:en:000"}
 
 
 def model_directory():
@@ -33,18 +36,23 @@ def model_directory():
 
 def local_catalog():
     entries = []
-    for language, model in MODELS.items():
-        for sid in range(model["speakers"]):
-            base = f"local:{language}:{sid:03d}"
+    # Put high-resolution voices first for automatic per-session allocation.
+    for key in ("zh_hq", "zh", "en"):
+        model = MODELS[key]
+        language = "zh" if key == "zh_hq" else key
+        for index in range(model["speakers"]):
+            sid = index + 3 if key == "zh_hq" else index
+            base = f"local:zh:hq{sid:03d}" if key == "zh_hq" else f"local:{language}:{sid:03d}"
             variants = [("", "标准 / Standard", 1.0)]
             if language == "zh":
                 variants += [("::low", "低音 / Low", .9), ("::high", "高音 / High", 1.1)]
             for suffix, label, scale in variants:
                 entries.append({"ShortName": base + suffix, "BaseVoice": base,
                             "Locale": "zh-CN" if language == "zh" else "en-GB",
-                            "Gender": "Unknown", "SpeakerId": sid,
+                            "Gender": "Unknown", "SpeakerId": sid + 1000 if key == "zh_hq" else sid,
+                            "Quality": "24 kHz" if key == "zh_hq" else ("8 kHz · Fast" if key == "zh" else "22.05 kHz"),
                             "NativeLanguage": language, "PitchHz": None, "PitchScale": scale,
-                            "DisplayName": f"{base} · {label} ({scale:.0%} 原音高 / native pitch)"})
+                            "DisplayName": f"{base} · {'24 kHz 清晰 / Clear' if key == 'zh_hq' else ('8 kHz 快速 / Fast' if key == 'zh' else 'Standard')} · {label} ({scale:.0%} 原音高 / native pitch)"})
     return entries
 
 
@@ -59,7 +67,11 @@ def model_ready(directory=None, language=None):
     directory = directory or model_directory()
     for lang in ([language] if language else MODELS):
         model = MODELS[lang]
-        files = [model["file"], "tokens.txt"] + (["lexicon.txt", "phone.fst", "date.fst", "number.fst"] if lang == "zh" else ["espeak-ng-data"])
+        if lang == "zh_hq":
+            files = [model["file"], "tokens.txt", "voices.bin", "lexicon-zh.txt", "lexicon-us-en.txt",
+                     "espeak-ng-data", "phone-zh.fst", "date-zh.fst", "number-zh.fst"]
+        else:
+            files = [model["file"], "tokens.txt"] + (["lexicon.txt", "phone.fst", "date.fst", "number.fst"] if lang == "zh" else ["espeak-ng-data"])
         if not all((directory / model["name"] / name).exists() for name in files):
             return False
     return True
@@ -128,6 +140,8 @@ class LocalEngine:
             raise ValueError("Local TTS model missing; run sound-of-vibe tts install")
         self.tts = {}
         for language, model in MODELS.items():
+            if language == "zh_hq":
+                continue
             folder = directory / model["name"]
             config = sherpa_onnx.OfflineTtsConfig(model=sherpa_onnx.OfflineTtsModelConfig(
                 vits=sherpa_onnx.OfflineTtsVitsModelConfig(
@@ -139,7 +153,25 @@ class LocalEngine:
             if not config.validate():
                 raise ValueError("Invalid local TTS model configuration")
             self.tts[language] = sherpa_onnx.OfflineTts(config)
+        self.hq = None
+        self.directory = directory
         self.lock = Lock()
+
+    def high_quality_engine(self):
+        if self.hq is None:
+            import sherpa_onnx
+            folder = self.directory / HQ_MODEL["name"]
+            config = sherpa_onnx.OfflineTtsConfig(model=sherpa_onnx.OfflineTtsModelConfig(
+                kokoro=sherpa_onnx.OfflineTtsKokoroModelConfig(
+                    model=str(folder / HQ_MODEL["file"]), voices=str(folder / "voices.bin"),
+                    tokens=str(folder / "tokens.txt"), lexicon=",".join(str(folder / name) for name in
+                    ("lexicon-zh.txt", "lexicon-us-en.txt")), data_dir=str(folder / "espeak-ng-data"), lang=""),
+                num_threads=2, provider="cpu"), silence_scale=.01,
+                rule_fsts=",".join(str(folder / name) for name in ("phone-zh.fst", "date-zh.fst", "number-zh.fst")))
+            if not config.validate():
+                raise ValueError("Invalid high-quality local TTS configuration")
+            self.hq = sherpa_onnx.OfflineTts(config)
+        return self.hq
 
     def synthesize(self, text, sid, speed, gender, pitch, robotic=True, cancelled=lambda: False,
                    language="zh", secondary_sid=None, pitch_scale=1.0):
@@ -151,7 +183,9 @@ class LocalEngine:
                 if cancelled():
                     return b""
                 speaker = sid if lang == language else (secondary_sid if secondary_sid is not None else sid % MODELS[lang]["speakers"])
-                audio = self.tts[lang].generate(text=part, sid=speaker, speed=speed,
+                tts = self.high_quality_engine() if lang == "zh" and speaker >= 1000 else self.tts[lang]
+                speaker = speaker - 1000 if lang == "zh" and speaker >= 1000 else speaker
+                audio = tts.generate(text=part, sid=speaker, speed=speed,
                                               callback=lambda samples, progress: 0 if cancelled() else 1)
                 if not len(audio.samples):
                     raise ValueError("Local TTS produced no audio")
@@ -161,18 +195,29 @@ class LocalEngine:
                     count = round(len(samples) * sample_rate / audio.sample_rate)
                     samples = np.interp(np.arange(count) * audio.sample_rate / sample_rate,
                                         np.arange(len(samples)), samples)
-                chunks.append(samples)
+                chunks.append((lang, samples))
         if cancelled():
             return b""
         if not chunks:
             raise ValueError("Local TTS produced no audio")
+        rendered = []
+        for lang, samples in chunks:
+            if cancelled():
+                return b""
+            if robotic:
+                from .robotic import mechanical_audio
+                segment = BytesIO()
+                sf.write(segment, samples, sample_rate, format="WAV", subtype="PCM_16")
+                # Each language uses a different speaker. Flatten them separately
+                # so an English term is not shifted to the Chinese speaker's pitch.
+                samples, _ = sf.read(BytesIO(mechanical_audio(segment.getvalue(),
+                    gender if lang == language else "Unknown",
+                    pitch if lang == language else None,
+                    pitch_scale if lang == language else 1.0)))
+            rendered.append(samples)
         buffer = BytesIO()
-        sf.write(buffer, np.concatenate(chunks), sample_rate, format="WAV", subtype="PCM_16")
-        data = buffer.getvalue()
-        if robotic:
-            from .robotic import mechanical_audio
-            data = mechanical_audio(data, gender, pitch, pitch_scale)
-        return data
+        sf.write(buffer, np.concatenate(rendered), sample_rate, format="WAV", subtype="PCM_16")
+        return buffer.getvalue()
 
 
 def local_engine():

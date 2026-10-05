@@ -11,7 +11,7 @@ body{margin:0;background:#f5f6fa;color:#202637;font:16px system-ui,sans-serif}ma
 <div class="row"><div><label for="zh">中文音色 / Chinese voice</label><select id="zh"></select></div><button id="preview-zh">试听中文 / Preview</button></div>
 <div class="row"><div><label for="en">英文音色 / English voice</label><select id="en"></select></div><button id="preview-en">试听英文 / Preview</button></div>
 <p class="small" id="voice-counts"></p>
-<p class="small">中文提供 174 个基础说话人及三种机械配置；英文提供 109 个基础说话人。机械朗读保持各自原生中心音高，低音/高音仅调整 ±10%，减少大幅改调的粗糙感。性别未标注，请以试听选择。<br>174 Chinese and 109 English speakers. Flat delivery keeps each voice’s native central pitch; low/high profiles shift it by only ±10%. Gender is unspecified; choose by preview.</p>
+<p class="small">中文提供 100 个 24 kHz 清晰音色及 174 个 8 kHz 快速音色；英文提供 109 个音色。清晰音色合成较慢，可按试听选择。机械朗读保持各自原生中心音高，低音/高音仅调整 ±10%，减少大幅改调的粗糙感。性别未标注，请以试听选择。<br>100 Chinese voices at 24 kHz plus 174 faster voices at 8 kHz; 109 English voices. Clear voices take longer to synthesize. Flat delivery keeps each voice’s native central pitch; low/high profiles shift it by only ±10%. Gender is unspecified; choose by preview.</p>
 <label for="rate">语速百分比 / Rate (%)</label><input id="rate" type="number" value="0" min="-50" max="100"><input id="rate-range" type="range" value="0" min="-50" max="100" step="1">
 <p class="small">拖动即时保存，无需重启。语速从下一句生效；音量和静音即时影响当前播放。<br>Changes save as you move the slider. Rate applies to the next utterance; volume and mute apply during playback.</p>
 <label for="volume">音量 / Volume <output id="volume-value">100%</output></label><input id="volume" type="range" min="0" max="100" value="100" step="1">

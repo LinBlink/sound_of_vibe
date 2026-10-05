@@ -17,7 +17,7 @@ from sound_of_vibe.voice_picker import preview
 class LocalTtsTests(unittest.IsolatedAsyncioTestCase):
     async def test_native_voice_pools_are_distinct_and_old_preferences_migrate(self):
         catalog = local_catalog()
-        self.assertEqual(len({v['BaseVoice'] for v in catalog if v['Locale'].startswith('zh-')}), 174)
+        self.assertEqual(len({v['BaseVoice'] for v in catalog if v['Locale'].startswith('zh-')}), 274)
         self.assertEqual(len({v['BaseVoice'] for v in catalog if v['Locale'].startswith('en-')}), 109)
         self.assertEqual(local_voices({'zh': 'zh-CN-YunyangNeural', 'en': 'en-US-EricNeural'}), LOCAL_VOICES)
         with tempfile.TemporaryDirectory() as temporary:
@@ -25,6 +25,7 @@ class LocalTtsTests(unittest.IsolatedAsyncioTestCase):
             pairs = [registry.choose(str(i), LOCAL_VOICES, catalog) for i in range(12)]
             self.assertEqual(len({p['zh'] for p in pairs}), 12)
             self.assertEqual(len({p['en'] for p in pairs}), 12)
+            self.assertTrue(all(p['zh'].startswith('local:zh:hq') for p in pairs))
 
     async def test_initialize_and_synthesize_do_not_connect_to_network(self):
         backend = LocalSpeech()
@@ -36,7 +37,7 @@ class LocalTtsTests(unittest.IsolatedAsyncioTestCase):
                 await backend.initialize()
                 await backend.synthesize(narration, backend.synthesis_settings(narration), lambda: False)
         args = engine.synthesize.call_args.args
-        self.assertEqual(args[:3], (narration.text, 66, 1.0))
+        self.assertEqual(args[:3], (narration.text, 1003, 1.0))
         self.assertEqual(args[-3:], ('zh', 0, 1.0))
 
     async def test_voice_preview_uses_the_same_local_engine_and_selected_pitch(self):
@@ -67,6 +68,33 @@ class LocalTtsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(engine.tts['en'].generate.call_args.kwargs['text'], 'FastAPI')
         self.assertEqual(engine.tts['en'].generate.call_args.kwargs['sid'], 7)
         self.assertEqual(engine.synthesize('测试', 66, 1, 'Unknown', 190, cancelled=lambda: True), b'')
+
+    async def test_mixed_speakers_are_not_forced_to_one_pitch(self):
+        import numpy as np
+        import soundfile as sf
+        engine = LocalEngine.__new__(LocalEngine)
+        generated = SimpleNamespace(samples=np.ones(2400) * .1, sample_rate=24000)
+        engine.tts = {lang: SimpleNamespace(generate=Mock(return_value=generated)) for lang in ('zh', 'en')}
+        engine.lock = Lock()
+        with patch('sound_of_vibe.robotic.mechanical_audio', side_effect=lambda audio, *args: audio) as flatten:
+            result = engine.synthesize('检查 FastAPI。', 66, 1, 'Unknown', 250,
+                                      language='zh', secondary_sid=3, pitch_scale=1.1)
+        self.assertEqual([call.args[1:] for call in flatten.call_args_list],
+                         [('Unknown', 250, 1.1), ('Unknown', None, 1.0)])
+        self.assertEqual(sf.info(BytesIO(result)).frames, 4800)
+
+    async def test_high_quality_voice_routes_to_24khz_model(self):
+        import numpy as np
+        import soundfile as sf
+        engine = LocalEngine.__new__(LocalEngine)
+        generated = SimpleNamespace(samples=np.ones(2400) * .1, sample_rate=24000)
+        generate = Mock(return_value=generated)
+        engine.high_quality_engine = Mock(return_value=SimpleNamespace(generate=generate))
+        engine.tts = {'zh': SimpleNamespace(generate=Mock(side_effect=AssertionError('Legacy model used')))}
+        engine.lock = Lock()
+        result = engine.synthesize('检查声音。', 1003, 1, 'Unknown', None, robotic=False)
+        self.assertEqual(generate.call_args.kwargs['sid'], 3)
+        self.assertEqual(sf.info(BytesIO(result)).samplerate, 24000)
 
     async def test_missing_model_stays_offline_and_download_checksum_is_enforced(self):
         with tempfile.TemporaryDirectory() as temporary:

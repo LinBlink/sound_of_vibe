@@ -7,7 +7,7 @@ name = "sound-of-vibe"
 version = "0.1.0"
 description = "Chinese and English progress narration for Codex and Kimi CLI"
 requires-python = ">=3.11"
-dependencies = ["sherpa-onnx>=1.13.8,<2", "pygame>=2.6,<3", "praat-parselmouth>=0.4.6,<0.5", "soundfile>=0.13,<0.14", "pystray>=0.19.5,<0.20", "pillow>=11,<13"]
+dependencies = ["sherpa-onnx>=1.13.8,<2", "pygame>=2.6,<3", "praat-parselmouth>=0.4.6,<0.5", "pyworld>=0.3.5,<0.4", "soundfile>=0.13,<0.14", "pystray>=0.19.5,<0.20", "pillow>=11,<13"]
 
 [project.optional-dependencies]
 legacy-online = ["edge-tts>=7.2,<8"]

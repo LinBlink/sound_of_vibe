@@ -10,7 +10,7 @@ def build():
     subprocess.run([sys.executable, '-m', 'PyInstaller', '--noconfirm', '--clean',
                     '--windowed', '--onedir', '--name', 'SoundOfVibe',
                     '--collect-all', 'sherpa_onnx', '--collect-all', 'sherpa_onnx_core',
-                    '--collect-all', 'sound_of_vibe', '--collect-all', 'parselmouth',
+                    '--collect-all', 'sound_of_vibe', '--collect-all', 'parselmouth', '--collect-all', 'pyworld',
                     '--hidden-import', 'pystray._win32', str(root / 'tools/windows_entry.py')],
                    cwd=root, check=True)
     print(root / 'dist/SoundOfVibe/SoundOfVibe.exe')
