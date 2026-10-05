@@ -58,7 +58,8 @@ def state_directory() -> Path:
 
 
 def load_settings(directory: Path) -> dict:
-    defaults = {"enabled": True, "language": "auto", "voices": DEFAULT_VOICES, "rate": "+0%", "per_session_voice": True}
+    defaults = {"enabled": True, "language": "auto", "voices": DEFAULT_VOICES, "rate": "+0%", "per_session_voice": True,
+                "adaptive_rate": True, "max_rate": 100}
     path = directory / "settings.json"
     if path.exists():
         defaults.update(json.loads(path.read_text(encoding="utf-8")))
@@ -213,6 +214,8 @@ class LoggedSpeech(EdgeSpeech):
         self.settings = load_settings(self.directory)
         self.voices = self.settings["voices"]
         self.rate = self.settings["rate"]
+        self.adaptive_rate = self.settings["adaptive_rate"]
+        self.max_rate = self.settings["max_rate"]
         if not self.settings.get("per_session_voice", True) or not narration.session:
             return super().voice_for(narration)
         pair = self.assignments.choose(self.scope + narration.session, self.voices, self.catalog)

@@ -32,6 +32,11 @@ def validate(data, voices):
         raise ValueError("语速范围 -50% 至 +100% / Rate range: -50% to +100%")
     if not isinstance(data.get("per_session_voice", True), bool):
         raise ValueError("Invalid automatic voice setting")
+    if not isinstance(data.get("adaptive_rate", True), bool):
+        raise ValueError("Invalid adaptive rate setting")
+    maximum = data.get("max_rate", 100)
+    if type(maximum) is not int or not int(rate[:-1]) <= maximum <= 100:
+        raise ValueError("追赶上限须在基础语速至 +100% / Catch-up limit must be between base rate and +100%")
     return selected, rate
 
 
@@ -45,7 +50,8 @@ def save_settings(root, data, voices):
         path = directory / "settings.json"
         # Saving a voice preference must never enable uninstalled/disabled hooks.
         settings = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {"enabled": False}
-        settings.update(voices=selected, rate=rate, per_session_voice=data.get("per_session_voice", True))
+        settings.update(voices=selected, rate=rate, per_session_voice=data.get("per_session_voice", True),
+                        adaptive_rate=data.get("adaptive_rate", True), max_rate=data.get("max_rate", 100))
         atomic_write(path, json.dumps(settings, ensure_ascii=False, indent=2) + "\n")
 
 
@@ -97,7 +103,7 @@ def create_server(root=None, voices=None):
                 html = (Path(__file__).parent / "assets" / "voices.html").read_text(encoding="utf-8")
                 return self.reply(html.replace("__TOKEN__", token).encode(), "text/html; charset=utf-8")
             if self.path == "/api/settings":
-                result = {name: {key: load_settings(directory).get(key) for key in ("voices", "rate", "per_session_voice")}
+                result = {name: {key: load_settings(directory).get(key) for key in ("voices", "rate", "per_session_voice", "adaptive_rate", "max_rate")}
                           for name, directory in (("kimi", root), ("codex", root / "Codex"))}
                 return self.reply({"settings": result, "voices": voices})
             if self.path in {"/sounds/complete", "/sounds/ask"}:

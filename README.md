@@ -92,6 +92,10 @@ Chinese choices are grouped by Mandarin, Taiwan, Cantonese and regional accents.
 
 Choose Chinese and English voices, preview, and save for Kimi, Codex, or both. The local page also previews both chimes. Keep the command running; Ctrl+C closes it. Voice previews use online TTS with fixed sample sentences.
 
+默认启用自适应语速：根据中英文待播文字估算积压时长，积压增加时逐句加速，减少后恢复基础语速。默认追赶上限 `+100%`，可在音色设置页调整或关闭自动加速。修改对下一句生效，正在播放的句子保持原速；提示音不变速。试听使用基础语速，将基础语速暂时调到上限即可预览追赶效果。生成持续快于最高播放速度时仍会积压。
+
+Adaptive speech rate is enabled by default. Queued Chinese and English text increases the rate of subsequent utterances, up to `+100%`; draining the queue restores the base rate. The voice settings page lets you change the limit or disable adaptation. Current playback and chimes retain their speed. Sustained generation faster than maximum playback can still build a queue.
+
 默认开启 **每个工作会话自动分配不同音色**：以原生 Hook 的 session ID 为 Agent 身份，中英文各自保留一个音色，多轮任务保持稳定。独立包装器进程也参与同一个音色分配表。所选音色是新会话的首选，已占用时分配其他音色；现有会话保留音色。关闭自动分配则固定使用手选音色。这里识别的是独立 CLI 会话；没有独立会话事件的内部子 Agent 无法单独识别。
 
 正常会话关闭且待播句子播放完毕后释放音色；异常退出留下的分配在 24 小时未使用后回收。可用音色数量有限，耗尽时保留文字并记录失败，不偷偷重复使用已占用音色。中文候选包含普通话、粤语、台湾及区域音色，自动分配可能改变口音。工作会话闲置超过 24 小时后恢复，可能重新分配。
@@ -213,6 +217,8 @@ Windows 使用 Job Object 管理本次启动的进程树，避免依赖全系统
 本机 Codex 位于 `C:\Users\wangb\AppData\Local\Programs\OpenAI\Codex\bin\codex.exe`，Kimi 位于 `C:\Users\wangb\.kimi-code\bin\kimi.exe`，当前均可从 PATH 调用。曾经的“未找到 Codex”仅代表当时进程的 PATH 查询结果，并不代表未安装。
 
 2026-10-05 新增 think 验证：90 项自动化测试通过，覆盖 Kimi 公开 think 块、Codex 多段公开摘要与重复记录、未公开内容排除，以及长段文字不被工具模板覆盖。裸 Codex 中英文任务和提问叮咚真实联调通过。Kimi 真实模型联调未在原 45 秒期限内完成，脚本现为 think/说明播放提供 180 秒等待；此轮不将 Kimi 原生联调计为通过。公开 think 适配器另以用户示例及合成中文摘要验证在线合成和播放。
+
+2026-10-05 自适应语速验证：93 项自动化测试通过，覆盖队列增长后加速、清空后恢复、双语顺序与完成提示、手动关闭、上限校验及设置热更新。固定示例经在线合成及机械处理，在 `+0%` / `+100%` 下中文时长为 6.26 / 3.17 秒，英文为 7.68 / 3.86 秒。
 
 ## Git 阶段提交
 

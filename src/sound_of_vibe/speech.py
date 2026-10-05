@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import re
 import tempfile
 from collections import deque
 from collections.abc import Callable
@@ -24,6 +25,27 @@ class EdgeSpeech:
         self.edge = None
         self.catalog = []
         self.robotic = robotic
+        self.adaptive_rate = True
+        self.max_rate = 100
+        self.backlog_seconds = 0.0
+
+    def set_backlog(self, items):
+        """Estimate queued spoken work, excluding offline chimes."""
+        self.backlog_seconds = sum(
+            len(re.findall(r"[\u3400-\u9fff]", item.text)) / 5
+            + len(re.findall(r"[A-Za-z0-9]+", item.text)) / 2.5
+            for item in items if item.action not in CHIME_ACTIONS | SILENT_ACTIONS
+        )
+
+    def rate_for(self):
+        base = int(self.rate.rstrip("%"))
+        if not self.adaptive_rate:
+            return self.rate
+        # Five seconds of queued speech is tolerated; larger queues accelerate
+        # the next utterance. Base rate stays intact and returns as work drains.
+        extra = max(0, int((self.backlog_seconds - 5) / 5)) * 10
+        effective = min(base + extra, max(base, self.max_rate))
+        return f"{effective:+d}%"
 
     async def initialize(self):
         import edge_tts
@@ -72,7 +94,7 @@ class EdgeSpeech:
             for attempt in range(2):
                 try:
                     communicate = self.edge.Communicate(narration.text,
-                                                       provider_voice, rate=self.rate)
+                                                       provider_voice, rate=self.rate_for())
                     await asyncio.wait_for(communicate.save(str(path)), timeout=self.timeout)
                     break
                 except asyncio.CancelledError:
@@ -232,6 +254,8 @@ class Speaker:
                 try:
                     self.current = narration
                     last_started = loop.time()
+                    if hasattr(self.backend, "set_backlog"):
+                        self.backend.set_backlog(([self.pending] if self.pending else []) + list(self.backlog))
                     await self.backend.speak(narration, lambda: not self.preserve_progress and generation != self.generation)
                 except asyncio.CancelledError:
                     raise
