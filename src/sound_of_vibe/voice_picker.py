@@ -13,6 +13,7 @@ from pathlib import Path
 from .hook_config import atomic_write
 from .kimi_hooks import load_settings, state_directory
 from .local_tts import local_catalog, local_engine, local_voices
+from .control import ServiceController, SETTINGS_LOCK
 
 
 async def catalog():
@@ -47,10 +48,11 @@ def save_settings(root, data, voices):
         directory = root / "Codex" if name == "codex" else root
         path = directory / "settings.json"
         # Saving a voice preference must never enable uninstalled/disabled hooks.
-        settings = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {"enabled": False}
-        settings.update(voices=selected, rate=rate, per_session_voice=data.get("per_session_voice", True),
-                        adaptive_rate=data.get("adaptive_rate", True), max_rate=data.get("max_rate", 100))
-        atomic_write(path, json.dumps(settings, ensure_ascii=False, indent=2) + "\n")
+        with SETTINGS_LOCK:
+            settings = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {"enabled": False}
+            settings.update(voices=selected, rate=rate, per_session_voice=data.get("per_session_voice", True),
+                            adaptive_rate=data.get("adaptive_rate", True), max_rate=data.get("max_rate", 100))
+            atomic_write(path, json.dumps(settings, ensure_ascii=False, indent=2) + "\n")
 
 
 async def preview(voice, rate, voices):
@@ -60,13 +62,15 @@ async def preview(voice, rate, voices):
     text = "文件修改已完成。测试全部通过。接下来检查执行结果。" if entry["Locale"].startswith("zh-") else "The file update is complete. All tests passed. Next, I will check the results."
     engine = await asyncio.to_thread(local_engine)
     return await asyncio.to_thread(engine.synthesize, text, entry["SpeakerId"],
-                                   1 + int(rate[:-1]) / 100, entry["Gender"], entry.get("PitchHz"), language="zh" if entry["Locale"].startswith("zh-") else "en")
+                                   1 + int(rate[:-1]) / 100, entry["Gender"], entry.get("PitchHz"),
+                                   language="zh" if entry["Locale"].startswith("zh-") else "en", pitch_scale=entry.get("PitchScale", 1))
 
 
-def create_server(root=None, voices=None):
+def create_server(root=None, voices=None, controller=None, on_exit=None):
     root = root or state_directory()
-    voices = asyncio.run(catalog()) if voices is None else voices
+    voices = local_catalog() if voices is None else voices
     token = secrets.token_urlsafe(32)
+    controller = controller or ServiceController(root)
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_):
@@ -93,12 +97,14 @@ def create_server(root=None, voices=None):
                 html = (Path(__file__).parent / "assets" / "voices.html").read_text(encoding="utf-8")
                 return self.reply(html.replace("__TOKEN__", token).encode(), "text/html; charset=utf-8")
             if self.path == "/api/settings":
-                result = {name: {key: load_settings(directory).get(key) for key in ("voices", "rate", "per_session_voice", "adaptive_rate", "max_rate")}
+                result = {name: {key: load_settings(directory).get(key) for key in ("voices", "rate", "per_session_voice", "adaptive_rate", "max_rate", "volume", "muted")}
                           for name, directory in (("kimi", root), ("codex", root / "Codex"))}
                 for preferences in result.values():
                     if any(v["ShortName"].startswith("local:") for v in voices):
                         preferences["voices"] = local_voices(preferences["voices"])
                 return self.reply({"settings": result, "voices": voices})
+            if self.path == "/api/service":
+                return self.reply({"sources": controller.status()})
             if self.path in {"/sounds/complete", "/sounds/ask"}:
                 return self.reply((Path(__file__).parent / "assets" / (self.path.rsplit("/", 1)[1] + ".ogg")).read_bytes(), "audio/ogg")
             self.reply({"error": "Not found"}, status=404)
@@ -117,6 +123,14 @@ def create_server(root=None, voices=None):
                 if self.path == "/api/save":
                     save_settings(root, data, voices)
                     return self.reply({"saved": True})
+                if self.path == "/api/control":
+                    return self.reply({"sources": controller.patch(data)})
+                if self.path == "/api/service":
+                    return self.reply({"sources": controller.set_enabled(data.get("enabled"), data.get("source", "both"))})
+                if self.path == "/api/tray-exit" and on_exit:
+                    self.reply({"stopping": True})
+                    threading.Thread(target=on_exit, daemon=True).start()
+                    return
                 if self.path == "/api/preview":
                     _, rate = validate(data, voices)
                     return self.reply(asyncio.run(preview(data.get("voice"), rate, voices)), "audio/wav")

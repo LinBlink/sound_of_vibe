@@ -24,6 +24,7 @@ def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description="Chinese / English progress narration for Codex and Kimi CLI")
     result.add_argument("--version", action="version", version=__version__)
     commands = result.add_subparsers(dest="command", required=True)
+    commands.add_parser("tray", help="Start the Windows tray application without a console window")
     tts = commands.add_parser("tts", help="Install or inspect the offline bilingual TTS model")
     tts.add_argument("tts_action", choices=("install", "status"))
     voices = commands.add_parser("voices", help="Open the local bilingual voice selector with previews")
@@ -108,6 +109,10 @@ def main(argv: list[str] | None = None) -> int:
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", errors="replace")
     try:
+        if args.command == "tray":
+            from .tray import launch
+            launch()
+            return 0
         if args.command == "tts":
             from .local_tts import install_model, model_directory, model_ready
             if args.tts_action == "install":

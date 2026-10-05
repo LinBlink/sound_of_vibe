@@ -6,14 +6,15 @@ from threading import Lock
 _PRAAT_LOCK = Lock()
 
 
-def mechanical_audio(audio: bytes, gender: str = "Female", pitch_hz: float | None = None) -> bytes:
+def mechanical_audio(audio: bytes, gender: str = "Female", pitch_hz: float | None = None,
+                     pitch_scale: float = 1.0) -> bytes:
     # Praat's command dispatcher is shared within this process. Concurrent
     # preview requests must not interleave its object selection state.
     with _PRAAT_LOCK:
-        return _render(audio, gender, pitch_hz)
+        return _render(audio, gender, pitch_hz, pitch_scale)
 
 
-def _render(audio: bytes, gender: str, pitch_hz: float | None) -> bytes:
+def _render(audio: bytes, gender: str, pitch_hz: float | None, pitch_scale: float) -> bytes:
     import numpy as np
     import parselmouth
     import soundfile as sf
@@ -26,7 +27,13 @@ def _render(audio: bytes, gender: str, pitch_hz: float | None) -> bytes:
     manipulation = call(sound, "To Manipulation", 0.01, 60, 500)
     tier = call(manipulation, "Extract pitch tier")
     call(tier, "Remove points between", sound.xmin, sound.xmax)
-    pitch = pitch_hz if pitch_hz is not None else (120 if gender == "Male" else 190)
+    if pitch_hz is None and gender == "Unknown":
+        frequencies = sound.to_pitch(time_step=.01, pitch_floor=60, pitch_ceiling=500).selected_array["frequency"]
+        voiced = frequencies[frequencies > 0]
+        pitch = float(np.median(voiced)) if len(voiced) else 190
+    else:
+        pitch = pitch_hz if pitch_hz is not None else (120 if gender == "Male" else 190)
+    pitch *= pitch_scale
     if not 60 <= pitch <= 500:
         raise ValueError("Mechanical pitch must be between 60 and 500 Hz")
     call(tier, "Add point", sound.xmin, pitch)

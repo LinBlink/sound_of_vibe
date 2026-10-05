@@ -37,7 +37,7 @@ class LocalTtsTests(unittest.IsolatedAsyncioTestCase):
                 await backend.synthesize(narration, backend.synthesis_settings(narration), lambda: False)
         args = engine.synthesize.call_args.args
         self.assertEqual(args[:3], (narration.text, 66, 1.0))
-        self.assertEqual(args[-2:], ('zh', 0))
+        self.assertEqual(args[-3:], ('zh', 0, 1.0))
 
     async def test_voice_preview_uses_the_same_local_engine_and_selected_pitch(self):
         catalog = local_catalog()
@@ -48,7 +48,8 @@ class LocalTtsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, b'RIFFpreview')
         args = engine.synthesize.call_args.args
         self.assertEqual(args[1:3], (66, 1.5))
-        self.assertEqual(args[4], 220)
+        self.assertIsNone(args[4])
+        self.assertEqual(engine.synthesize.call_args.kwargs['pitch_scale'], 1.1)
         self.assertEqual(engine.synthesize.call_args.kwargs['language'], 'zh')
 
     async def test_mixed_text_and_cancellation_never_drop_english_identifiers(self):

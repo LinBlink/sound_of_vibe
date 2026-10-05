@@ -60,7 +60,7 @@ def state_directory() -> Path:
 
 def load_settings(directory: Path) -> dict:
     defaults = {"enabled": True, "language": "auto", "voices": LOCAL_VOICES, "rate": "+0%", "per_session_voice": True,
-                "adaptive_rate": True, "max_rate": 100}
+                "adaptive_rate": True, "max_rate": 100, "volume": 100, "muted": False}
     path = directory / "settings.json"
     if path.exists():
         defaults.update(json.loads(path.read_text(encoding="utf-8")))
@@ -160,7 +160,8 @@ def launch_worker(queue: HookQueue, token: str):
     options = {"creationflags": subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt" else {"start_new_session": True}
     try:
         with (queue.directory / "launcher.log").open("ab") as errors:
-            subprocess.Popen([str(python), "-m", "sound_of_vibe.kimi_hooks", "worker",
+            prefix = [str(python)] if getattr(sys, 'frozen', False) else [str(python), "-m", "sound_of_vibe.kimi_hooks"]
+            subprocess.Popen([*prefix, "worker",
                               "--state-dir", str(queue.directory), "--token", token],
                              stdin=subprocess.DEVNULL, stdout=errors, stderr=errors,
                              cwd=queue.directory, **options)
@@ -210,6 +211,14 @@ class LoggedSpeech(LocalSpeech):
         self.assignments = VoiceAssignments(state_directory())
         self.scope = str(directory.resolve()) + ":"
         self.assigned = {}
+        self.last_controls_read = 0
+
+    def playback_controls(self):
+        now = time.monotonic()
+        if now - self.last_controls_read >= .05:
+            self.settings = load_settings(self.directory)
+            self.last_controls_read = now
+        return self.settings
 
     def voice_for(self, narration):
         self.settings = load_settings(self.directory)
@@ -383,6 +392,11 @@ async def worker(directory: Path, token: str, idle_seconds: float = IDLE_SECONDS
     cancel = False
     ended_sessions = set()
     log(directory, f"Worker started (pid={os.getpid()}).")
+    warm = None
+    if backend is not None:
+        from .local_tts import local_engine
+        warm = asyncio.create_task(asyncio.to_thread(local_engine))
+        warm.add_done_callback(lambda task: None if task.cancelled() else task.exception())
     try:
         while True:
             if not queue.renew(token) or not load_settings(directory)["enabled"]:
@@ -419,6 +433,8 @@ async def worker(directory: Path, token: str, idle_seconds: float = IDLE_SECONDS
         await speaker.close(cancel=True)
         raise
     finally:
+        if warm:
+            warm.cancel()
         queue.release(token)
         log(directory, "Worker stopped.")
 

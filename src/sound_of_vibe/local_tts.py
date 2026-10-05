@@ -35,11 +35,17 @@ def local_catalog():
     entries = []
     for language, model in MODELS.items():
         for sid in range(model["speakers"]):
-            entries.append({"ShortName": f"local:{language}:{sid:03d}",
+            base = f"local:{language}:{sid:03d}"
+            variants = [("", "标准 / Standard", 1.0)]
+            if language == "zh":
+                variants += [("::low", "低音 / Low", .9), ("::high", "高音 / High", 1.1)]
+            for suffix, label, scale in variants:
+                entries.append({"ShortName": base + suffix, "BaseVoice": base,
                             "Locale": "zh-CN" if language == "zh" else "en-GB",
                             "Gender": "Unknown", "SpeakerId": sid,
-                            "NativeLanguage": language})
-    return voice_profiles(entries)
+                            "NativeLanguage": language, "PitchHz": None, "PitchScale": scale,
+                            "DisplayName": f"{base} · {label} ({scale:.0%} 原音高 / native pitch)"})
+    return entries
 
 
 def local_voices(selected):
@@ -136,7 +142,7 @@ class LocalEngine:
         self.lock = Lock()
 
     def synthesize(self, text, sid, speed, gender, pitch, robotic=True, cancelled=lambda: False,
-                   language="zh", secondary_sid=None):
+                   language="zh", secondary_sid=None, pitch_scale=1.0):
         import numpy as np
         import soundfile as sf
         chunks, sample_rate = [], None
@@ -165,7 +171,7 @@ class LocalEngine:
         data = buffer.getvalue()
         if robotic:
             from .robotic import mechanical_audio
-            data = mechanical_audio(data, gender, pitch)
+            data = mechanical_audio(data, gender, pitch, pitch_scale)
         return data
 
 
@@ -193,19 +199,20 @@ class LocalSpeech(EdgeSpeech):
 
     def synthesis_settings(self, narration):
         settings = super().synthesis_settings(narration)
+        primary = next(v for v in self.catalog if v["ShortName"] == self.voice_for(narration))
         alternate = "en" if narration.language == "zh" else "zh"
         secondary = self.voice_for(replace(narration, language=alternate))
         entry = next(v for v in self.catalog if v["ShortName"] == secondary)
-        return (*settings, entry["SpeakerId"])
+        return (*settings, entry["SpeakerId"], primary.get("PitchScale", 1))
 
     async def synthesize(self, narration, settings, stale):
-        voice, rate, gender, pitch, robotic, secondary_sid = settings
+        voice, rate, gender, pitch, robotic, secondary_sid, pitch_scale = settings
         entry = next(v for v in self.catalog if v["BaseVoice"] == voice)
         cancelled = Event()
         try:
             return await asyncio.to_thread(self.engine.synthesize, narration.text,
                                            entry["SpeakerId"], max(.5, 1 + int(rate[:-1]) / 100),
-                                           gender, pitch, robotic, lambda: cancelled.is_set() or stale(), narration.language, secondary_sid)
+                                           gender, pitch, robotic, lambda: cancelled.is_set() or stale(), narration.language, secondary_sid, pitch_scale)
         except asyncio.CancelledError:
             cancelled.set()
             raise

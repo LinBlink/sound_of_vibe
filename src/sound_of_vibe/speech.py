@@ -101,6 +101,18 @@ class EdgeSpeech:
     def voice_for(self, narration: Narration) -> str:
         return self.voices[narration.language]
 
+    def playback_controls(self):
+        return {"enabled": True, "volume": 100, "muted": False}
+
+    def update_playback(self):
+        settings = self.playback_controls()
+        self.mixer.music.set_volume(0 if settings.get("muted", False) else settings.get("volume", 100) / 100)
+        if not settings.get("enabled", True):
+            self.cancel_prefetch()
+            self.mixer.music.stop()
+            return False
+        return True
+
     async def synthesize(self, narration, settings, stale):
         voice, rate, gender, pitch, robotic = settings
         descriptor, filename = tempfile.mkstemp(prefix="sound-of-vibe-", suffix=".mp3")
@@ -131,8 +143,12 @@ class EdgeSpeech:
             name = "complete" if narration.action == "complete" else "ask"
             try:
                 self.mixer.music.load(str(Path(__file__).parent / "assets" / (name + ".ogg")))
+                if not self.update_playback():
+                    return False
                 self.mixer.music.play()
                 while self.mixer.music.get_busy():
+                    if not self.update_playback():
+                        return False
                     await asyncio.sleep(0.05)
                 return True
             finally:
@@ -157,8 +173,12 @@ class EdgeSpeech:
             if stale():
                 return False
             self.mixer.music.load(str(path), namehint="wav" if self.robotic else self.audio_format)
+            if not self.update_playback():
+                return False
             self.mixer.music.play()
             while self.mixer.music.get_busy():
+                if not self.update_playback():
+                    return False
                 self.prefetch_next()
                 await asyncio.sleep(0.01)
             return True
