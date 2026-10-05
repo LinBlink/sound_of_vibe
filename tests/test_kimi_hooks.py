@@ -20,6 +20,15 @@ def hook(kind, session="session1", **extra):
 
 
 class HookTests(unittest.TestCase):
+    def test_native_synthesis_stall_keeps_worker_ownership(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            queue = HookQueue(Path(temporary))
+            token = queue.reserve(now=100)
+            with patch('sound_of_vibe.kimi_hooks.time.time', return_value=101):
+                self.assertTrue(queue.renew(token))
+            self.assertIsNone(queue.reserve(now=120))
+            self.assertIsNotNone(queue.reserve(now=162))
+
     def test_normalized_events_do_not_store_prompt_or_tool_data(self):
         prompt = "Check API_SECRET_DO_NOT_STORE in README.md"
         event = normalize_hook(hook("TurnStarted", prompt=prompt, turn_id="turn1"))

@@ -31,7 +31,9 @@ HOOK_EVENTS = ("SessionStart", "TurnStarted", "PreToolUse", "PostToolUse", "Post
                "PermissionRequest", "PermissionResult", "SessionHeartbeat",
                "Stop", "StopFailure", "Interrupt", "SessionEnd")
 QUEUE_LIMIT = 512
-LEASE_SECONDS = 5
+# Native TTS and pitch processing can hold the GIL longer than five seconds.
+# Keep ownership across these stalls; Stop explicitly revokes the lease.
+LEASE_SECONDS = 60
 IDLE_SECONDS = 120
 PROGRESS_SECONDS = 12
 PROGRESS_TEXT = {
