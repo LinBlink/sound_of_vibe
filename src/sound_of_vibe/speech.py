@@ -28,6 +28,37 @@ class EdgeSpeech:
         self.adaptive_rate = True
         self.max_rate = 100
         self.backlog_seconds = 0.0
+        self.next_narration = lambda: (None, [])
+        self.prefetched = None
+
+    def cancel_prefetch(self):
+        if self.prefetched is not None:
+            self.prefetched[2].cancel()
+            self.prefetched = None
+
+    def synthesis_settings(self, narration):
+        voice = self.voice_for(narration)
+        profile = next((v for v in self.catalog if v["ShortName"] == voice), {})
+        return (profile.get("BaseVoice", voice), self.rate_for(),
+                profile.get("Gender", "Female"), profile.get("PitchHz"), self.robotic)
+
+    def prefetch_next(self):
+        if self.prefetched is not None:
+            return
+        narration, remaining = self.next_narration()
+        if narration is None or narration.action in CHIME_ACTIONS:
+            return
+        self.set_backlog(remaining)
+        try:
+            settings = self.synthesis_settings(narration)
+        except Exception:
+            # Report this through normal speech handling when its turn arrives;
+            # an unavailable next voice must not interrupt current playback.
+            return
+        task = asyncio.create_task(self.synthesize(narration, settings, lambda: False))
+        # A failed speculative request must not become an unhandled exception.
+        task.add_done_callback(lambda done: None if done.cancelled() else done.exception())
+        self.prefetched = (narration, settings, task)
 
     def set_backlog(self, items):
         """Estimate queued spoken work, excluding offline chimes."""
@@ -69,6 +100,30 @@ class EdgeSpeech:
     def voice_for(self, narration: Narration) -> str:
         return self.voices[narration.language]
 
+    async def synthesize(self, narration, settings, stale):
+        voice, rate, gender, pitch, robotic = settings
+        descriptor, filename = tempfile.mkstemp(prefix="sound-of-vibe-", suffix=".mp3")
+        os.close(descriptor)
+        path = Path(filename)
+        try:
+            for attempt in range(2):
+                try:
+                    communicate = self.edge.Communicate(narration.text, voice, rate=rate)
+                    await asyncio.wait_for(communicate.save(str(path)), timeout=self.timeout)
+                    break
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    if attempt or stale():
+                        raise
+            audio = path.read_bytes()
+            if robotic:
+                from .robotic import mechanical_audio
+                audio = await asyncio.to_thread(mechanical_audio, audio, gender, pitch)
+            return audio
+        finally:
+            path.unlink(missing_ok=True)
+
     async def speak(self, narration: Narration, stale: Callable[[], bool]):
         if narration.action in CHIME_ACTIONS:
             self.initialize_audio()
@@ -88,32 +143,23 @@ class EdgeSpeech:
         os.close(descriptor)
         path = Path(filename)
         try:
-            voice = self.voice_for(narration)
-            profile = next((v for v in self.catalog if v["ShortName"] == voice), {})
-            provider_voice = profile.get("BaseVoice", voice)
-            for attempt in range(2):
-                try:
-                    communicate = self.edge.Communicate(narration.text,
-                                                       provider_voice, rate=self.rate_for())
-                    await asyncio.wait_for(communicate.save(str(path)), timeout=self.timeout)
-                    break
-                except asyncio.CancelledError:
-                    raise
-                except Exception:
-                    if attempt or stale():
-                        raise
-            if self.robotic:
-                from .robotic import mechanical_audio
-                gender = profile.get("Gender", "Female")
-                audio = await asyncio.to_thread(mechanical_audio, path.read_bytes(), gender, profile.get("PitchHz"))
-                path.write_bytes(audio)
+            settings = self.synthesis_settings(narration)
+            if self.prefetched is not None and self.prefetched[:2] == (narration, settings):
+                task = self.prefetched[2]
+                self.prefetched = None
+                audio = await task
+            else:
+                self.cancel_prefetch()
+                audio = await self.synthesize(narration, settings, stale)
+            path.write_bytes(audio)
             # New progress can arrive while the network request is running.
             if stale():
                 return False
             self.mixer.music.load(str(path), namehint="wav" if self.robotic else "mp3")
             self.mixer.music.play()
             while self.mixer.music.get_busy():
-                await asyncio.sleep(0.05)
+                self.prefetch_next()
+                await asyncio.sleep(0.01)
             return True
         finally:
             try:
@@ -124,6 +170,7 @@ class EdgeSpeech:
                 path.unlink(missing_ok=True)
 
     def close(self):
+        self.cancel_prefetch()
         if self.mixer and self.mixer.get_init():
             self.mixer.music.stop()
             self.mixer.music.unload()
@@ -140,7 +187,7 @@ class Speaker:
 
     def __init__(self, backend: EdgeSpeech | None,
                  output: Callable[[Narration], None], diagnostic: Callable[[str], None],
-                 interval: float = 3, continuous: bool = False, preserve_progress: bool = False,
+                 interval: float = 0, continuous: bool = False, preserve_progress: bool = False,
                  max_pending: int = 3, prefer_commentary: bool = False,
                  max_commentary_pending: int = 256):
         self.backend = backend
@@ -160,6 +207,12 @@ class Speaker:
         self.terminal = False
         self.task: asyncio.Task | None = None
         self.current: Narration | None = None
+        if isinstance(backend, EdgeSpeech) and preserve_progress:
+            backend.next_narration = self.next_for_prefetch
+
+    def next_for_prefetch(self):
+        items = ([self.pending] if self.pending else []) + list(self.backlog)
+        return (items[0], items[1:]) if items else (None, [])
 
     def submit(self, narration: Narration):
         if self.closed or (self.terminal and not self.continuous):

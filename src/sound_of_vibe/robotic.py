@@ -37,6 +37,12 @@ def _render(audio: bytes, gender: str, pitch_hz: float | None) -> bytes:
     peak = float(np.max(np.abs(output)))
     if peak > 0:
         output *= min(2.0, 0.85 / peak)
+    # Remove provider padding at sentence boundaries, retaining 10 ms to avoid
+    # clipping consonant onsets and releases. Internal pauses remain intact.
+    active = np.flatnonzero(np.max(np.abs(output), axis=1) > 0.003)
+    if len(active):
+        padding = round(rate * 0.01)
+        output = output[max(0, active[0] - padding):min(len(output), active[-1] + padding + 1)]
     buffer = BytesIO()
     sf.write(buffer, output, rate, format="WAV", subtype="PCM_16")
     return buffer.getvalue()

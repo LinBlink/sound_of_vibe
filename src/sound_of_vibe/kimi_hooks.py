@@ -375,7 +375,7 @@ async def worker(directory: Path, token: str, idle_seconds: float = IDLE_SECONDS
     backend = None if settings.get("text_only", False) else LoggedSpeech(directory, settings)
     speaker = Speaker(backend,
                       lambda item: log(directory, f"[voice/{item.language}] {item.text} session={item.session}"),
-                      lambda message: log(directory, message), interval=1, continuous=True,
+                      lambda message: log(directory, message), interval=0, continuous=True,
                       preserve_progress=True, max_pending=6, prefer_commentary=True)
     narrator = HookNarrator(speaker, settings["language"])
     last_event = time.monotonic()

@@ -96,6 +96,10 @@ Choose Chinese and English voices, preview, and save for Kimi, Codex, or both. T
 
 Adaptive speech rate is enabled by default. Queued Chinese and English text increases the rate of subsequent utterances, up to `+100%`; draining the queue restores the base rate. The voice settings page lets you change the limit or disable adaptation. Current playback and chimes retain their speed. Sustained generation faster than maximum playback can still build a queue.
 
+连续播放不再添加句间等待；播放当前句时提前合成下一句，并裁掉机械音频首尾的多余静音，保留约 10 ms 边缘避免切掉发音。中英文和会话音色仍按原顺序播放；中断会取消预合成。网络合成未及时完成时仍可能短暂等待，句内自然停顿保留。
+
+Continuous playback adds no sentence delay. The next queued utterance is synthesized during playback, and excess leading/trailing silence is removed from mechanical audio. Ordering, per-session voices, and internal pauses are preserved. Slow synthesis can still cause a short gap.
+
 默认开启 **每个工作会话自动分配不同音色**：以原生 Hook 的 session ID 为 Agent 身份，中英文各自保留一个音色，多轮任务保持稳定。独立包装器进程也参与同一个音色分配表。所选音色是新会话的首选，已占用时分配其他音色；现有会话保留音色。关闭自动分配则固定使用手选音色。这里识别的是独立 CLI 会话；没有独立会话事件的内部子 Agent 无法单独识别。
 
 正常会话关闭且待播句子播放完毕后释放音色；异常退出留下的分配在 24 小时未使用后回收。可用音色数量有限，耗尽时保留文字并记录失败，不偷偷重复使用已占用音色。中文候选包含普通话、粤语、台湾及区域音色，自动分配可能改变口音。工作会话闲置超过 24 小时后恢复，可能重新分配。
