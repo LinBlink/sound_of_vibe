@@ -17,6 +17,7 @@ CHIME_ACTIONS = {"complete", "ask", "permission"}
 
 
 class EdgeSpeech:
+    audio_format = "mp3"
     def __init__(self, voices: dict[str, str], rate: str = "+0%", timeout: float = 10, robotic: bool = True):
         self.voices = voices
         self.rate = rate
@@ -155,7 +156,7 @@ class EdgeSpeech:
             # New progress can arrive while the network request is running.
             if stale():
                 return False
-            self.mixer.music.load(str(path), namehint="wav" if self.robotic else "mp3")
+            self.mixer.music.load(str(path), namehint="wav" if self.robotic else self.audio_format)
             self.mixer.music.play()
             while self.mixer.music.get_busy():
                 self.prefetch_next()

@@ -9,7 +9,8 @@ from pathlib import Path
 from . import __version__
 from .rules import Narrator
 from .runner import build_command, consume_process, expand_windows_shim, replay, resolve_executable
-from .speech import DEFAULT_VOICES, EdgeSpeech, Speaker
+from .speech import Speaker
+from .local_tts import LOCAL_VOICES
 from . import hook_config, codex_hook_config
 
 
@@ -23,6 +24,8 @@ def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description="Chinese / English progress narration for Codex and Kimi CLI")
     result.add_argument("--version", action="version", version=__version__)
     commands = result.add_subparsers(dest="command", required=True)
+    tts = commands.add_parser("tts", help="Install or inspect the offline bilingual TTS model")
+    tts.add_argument("tts_action", choices=("install", "status"))
     voices = commands.add_parser("voices", help="Open the local bilingual voice selector with previews")
     voices.add_argument("--no-browser", action="store_true")
     hooks = commands.add_parser("hooks", help="Enable automatic voice narration for plain kimi or codex")
@@ -34,8 +37,8 @@ def parser() -> argparse.ArgumentParser:
         sub.add_argument("--state-dir", type=Path, help="Alternate narration state directory")
         if name == "install":
             sub.add_argument("--language", choices=("auto", "zh", "en"), default="auto")
-            sub.add_argument("--voice-zh", default=DEFAULT_VOICES["zh"])
-            sub.add_argument("--voice-en", default=DEFAULT_VOICES["en"])
+            sub.add_argument("--voice-zh", default=LOCAL_VOICES["zh"])
+            sub.add_argument("--voice-en", default=LOCAL_VOICES["en"])
             sub.add_argument("--rate", type=rate_value, default="+0%")
             sub.add_argument("--text-only", action="store_true", help="Log hook narration without audio")
     for name in ("run", "replay"):
@@ -43,8 +46,8 @@ def parser() -> argparse.ArgumentParser:
         sub.add_argument("source", choices=("kimi", "codex"))
         sub.add_argument("--prompt", required=name == "run", default="")
         sub.add_argument("--language", choices=("auto", "zh", "en"), default="auto")
-        sub.add_argument("--voice-zh", default=DEFAULT_VOICES["zh"])
-        sub.add_argument("--voice-en", default=DEFAULT_VOICES["en"])
+        sub.add_argument("--voice-zh", default=LOCAL_VOICES["zh"])
+        sub.add_argument("--voice-en", default=LOCAL_VOICES["en"])
         sub.add_argument("--rate", type=rate_value, default="+0%")
         sub.add_argument("--text-only", action="store_true", help="Disable speech; run mode still launches the agent")
         if name == "run":
@@ -105,6 +108,15 @@ def main(argv: list[str] | None = None) -> int:
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", errors="replace")
     try:
+        if args.command == "tts":
+            from .local_tts import install_model, model_directory, model_ready
+            if args.tts_action == "install":
+                install_model(lambda text: print(text, flush=True))
+            else:
+                import json
+                print(json.dumps({"backend": "local-vits-piper", "ready": model_ready(),
+                                  "model": str(model_directory())}, ensure_ascii=False, indent=2))
+            return 0
         if args.command == "voices":
             from .voice_picker import open_picker
             open_picker(args.no_browser)

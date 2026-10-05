@@ -14,7 +14,7 @@ import uuid
 from pathlib import Path
 
 from .kimi_hooks import HOOK_EVENTS, state_directory
-from .speech import DEFAULT_VOICES
+from .local_tts import LOCAL_VOICES as DEFAULT_VOICES
 
 BEGIN = "# BEGIN sound-of-vibe managed hooks"
 END = "# END sound-of-vibe managed hooks"
@@ -101,7 +101,7 @@ def install(config: Path | None = None, state: Path | None = None,
     config = config or config_path()
     state = (state or state_directory()).resolve()
     python = python or Path(sys.executable)
-    for module in ("edge_tts", "pygame"):
+    for module in ("sherpa_onnx", "pygame"):
         if not text_only and importlib.util.find_spec(module) is None:
             raise ValueError(f"Missing {module}; install sound-of-vibe dependencies first")
     original = config.read_text(encoding="utf-8") if config.exists() else ""

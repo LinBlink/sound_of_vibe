@@ -2,11 +2,11 @@
 
 import uuid
 
-from .speech import EdgeSpeech
+from .local_tts import LocalSpeech
 from .voice_assignment import VoiceAssignments
 
 
-class WindowSpeech(EdgeSpeech):
+class WindowSpeech(LocalSpeech):
     def __init__(self, voices, rate, directory):
         super().__init__(voices, rate)
         self.registry = VoiceAssignments(directory)

@@ -10,7 +10,7 @@ from pathlib import Path
 from .codex_hooks import HOOK_EVENTS, codex_state
 from .codex_transcript import codex_home
 from .hook_config import atomic_write, backup_config, hook_command, daemon_status
-from .speech import DEFAULT_VOICES
+from .local_tts import LOCAL_VOICES as DEFAULT_VOICES
 
 MARKER = "Sound of Vibe: voice narration"
 
@@ -65,7 +65,7 @@ def install(config: Path | None = None, state: Path | None = None,
             python: Path | None = None, text_only: bool = False) -> dict:
     config = config or config_path()
     state = (state or codex_state()).resolve()
-    for module in ("edge_tts", "pygame"):
+    for module in ("sherpa_onnx", "pygame"):
         if not text_only and importlib.util.find_spec(module) is None:
             raise ValueError(f"Missing {module}; install sound-of-vibe dependencies first")
     preferences = config.parent / "config.toml"

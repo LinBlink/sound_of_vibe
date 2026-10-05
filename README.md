@@ -4,7 +4,7 @@
 
 ```text
 CLI JSONL → event adapter → bilingual progress rules → language / deduplication
-          → latest-progress queue → Edge TTS → audio playback
+          → ordered speech queue → local VITS / Piper (CPU) → audio playback
 ```
 
 支持 Codex / Kimi 全局交互旁白和单次任务包装器，Windows 优先。通过规则或工具动作生成简短旁白，不额外调用总结或翻译模型。
@@ -16,9 +16,10 @@ CLI JSONL → event adapter → bilingual progress rules → language / deduplic
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e .
+.\.venv\Scripts\sound-of-vibe.exe tts install
 ```
 
-当前工作区已经创建 `.venv` 并安装依赖，可以直接使用下列命令，无需激活虚拟环境。其他机器若只有 `py` 启动器，可将第一行改为 `py -3 -m venv .venv`。
+当前工作区已经创建 `.venv`、安装依赖及本地中英文 TTS 模型，可以直接使用下列命令，无需激活虚拟环境。其他机器若只有 `py` 启动器，可将第一行改为 `py -3 -m venv .venv`。
 
 ## 使用 / Usage
 
@@ -46,7 +47,7 @@ kimi
 
 Run `hooks install` once, then use plain `kimi` in any project. Chinese prompts select Chinese narration; English prompts select English narration. Restart existing Kimi sessions after installation.
 
-安装会备份 `~/.kimi-code/config.toml`，仅添加带标记的 Hooks 配置，保留其他配置和已有 Hooks；关闭时仅移除本工具的配置块。原生交互界面、工具权限和审批由 Kimi 自己处理。挂钩静默返回，后台进程合成、播放音频，空闲 120 秒后退出，下次任务自动启动。
+安装会备份 `~/.kimi-code/config.toml`，仅添加带标记的 Hooks 配置，保留其他配置和已有 Hooks；关闭时仅移除本工具的配置块。原生交互界面、工具权限和审批由 Kimi 自己处理。挂钩静默返回，后台进程合成、播放音频，空闲 10 分钟后退出，模型在进程存活期间复用，下次任务自动启动。
 
 **全局模式会朗读工具调用之间助手实际说的进展说明**，包括“修复后……”“54 项测试通过……”“接下来验证……”这样的整段对话，中文和英文分别使用对应音色。代码 diff、工具输出、报错堆栈、未公开的推理和最终回答继续过滤。
 
@@ -54,11 +55,11 @@ Run `hooks install` once, then use plain `kimi` in any project. Chinese prompts 
 
 实际说明优先于排队的通用工具提示。没有说明时，仍播报任务开始、工具动作、工具结束或失败、审批等待及任务完成。连续 12 秒没有新阶段时，仅在日志记录仍在处理或等待工具结果；等待提示不播放人声，审批请求只响一次提问提示音；结束、取消和关闭会话后停止定时提示。
 
-同类工具动作 5 秒内去重，实际说明按原文去重，不因属于相同动作而丢弃其他句子。语音开始间隔至少 1 秒。保留当前句，普通提示最多 6 条待播，实际文字最多 256 段，新进度不会取消正在合成的句子，完成叮咚排在待播执行动作后；普通提示超过上限时合并较旧的待播提示；实际文字达到 256 段上限时记录明确诊断，原文仍保留在日志。多个会话共享一个播放队列。工具调用前的播报表示即将执行，是否批准仍由 Kimi 决定。
+同类工具动作 5 秒内去重，实际说明按原文去重，不因属于相同动作而丢弃其他句子。不添加句间播放等待。保留当前句，普通提示最多 6 条待播，实际文字最多 256 段，新进度不会取消正在合成的句子，完成叮咚排在待播执行动作后；普通提示超过上限时合并较旧的待播提示；实际文字达到 256 段上限时记录明确诊断，原文仍保留在日志。多个会话共享一个播放队列。工具调用前的播报表示即将执行，是否批准仍由 Kimi 决定。
 
 The global mode reads actual intermediate assistant prose in Chinese and English, including findings and test results. It filters code, tool output, unpublished reasoning, and final answers; visible think and public reasoning summaries are narrated. Tool/status templates remain a fallback, with silent status logging after 12 seconds without a new stage.
 
-默认日志：`%LOCALAPPDATA%\SoundOfVibe\worker.log`，包含事件类型、会话标识、过滤后的旁白和播放结果，不复制原始提示词、工具命令或工具结果。在线 TTS 接收过滤后的公开 think、推理摘要、助手说明或旁白模板，说明可能包含项目名称。Hooks 失败时静默跳过，不影响 Kimi 工作。
+默认日志：`%LOCALAPPDATA%\SoundOfVibe\worker.log`，包含事件类型、会话标识、过滤后的旁白和播放结果，不复制原始提示词、工具命令或工具结果。公开 think、推理摘要、助手说明或旁白模板在本机合成，不向 TTS 网络服务发送文字。Hooks 失败时静默跳过，不影响 Kimi 工作。
 
 配置保存了本仓库虚拟环境的绝对路径；移动仓库或重建 `.venv` 后需重新执行 `hooks install`。上述管理命令从本仓库运行；在其他目录管理时，请使用 `sound-of-vibe.exe` 的完整路径。单次任务包装器会自动避免与全局旁白重复播放。
 
@@ -74,7 +75,7 @@ The global mode reads actual intermediate assistant prose in Chinese and English
 
 Only owned handlers in `~/.codex/hooks.json` are managed. Other hooks and `config.toml` remain intact. Review and trust the 8 voice hooks once in native `/hooks`; then run plain `codex` in any project.
 
-从当前 `~/.codex/sessions` 会话游标增量读取 `phase=commentary` 的实际说明；过滤最终回答、未公开的推理、工具输出和重复消息。日志位于 `%LOCALAPPDATA%\SoundOfVibe\Codex\worker.log`。完成后空闲 120 秒退出；活动任务 10 分钟没有任何新事件时退出，下次 Hook 自动启动。Kimi 与 Codex 各自排队播放，音色分配跨两者协调。
+从当前 `~/.codex/sessions` 会话游标增量读取 `phase=commentary` 的实际说明；过滤最终回答、未公开的推理、工具输出和重复消息。日志位于 `%LOCALAPPDATA%\SoundOfVibe\Codex\worker.log`。完成后空闲 10 分钟退出；活动任务 10 分钟没有任何新事件时退出，下次 Hook 自动启动。Kimi 与 Codex 各自排队播放，音色分配跨两者协调。
 
 ### 音色选择与试听 / Voice selection and previews
 
@@ -86,25 +87,23 @@ Only owned handlers in `~/.codex/hooks.json` are managed. Other hooks and `confi
 
 自动打开本地音色页：分别选择中文、英文音色，点击试听，再保存到 Kimi、Codex 或两者。也可以试听“完成”和“需要回答”两种叮咚。保持命令运行以使用页面，Ctrl+C 关闭服务；`--no-browser` 只打印访问地址。页面仅绑定 `127.0.0.1`，保存不修改 Hooks 命令，也不启用原本关闭的 Hooks。
 
-中文列表按普通话、台湾、粤语和地方口音分组，显示真实基础音色数和配置数。当前在线库验证有 14 个中文基础音色，每个提供标准、低音、高音三个固定音高配置，共 42 种。男性配置为 100 / 120 / 150 Hz，女性为 160 / 190 / 220 Hz；这是 14 个基础音色的音高变体，不是 42 个不同说话人。自动分配也支持这些配置，已有会话保持原来的音色。选择低音或高音后，实际 TTS 请求仍使用原始音色 ID，本地处理应用所选音高。
+本地音色列表提供 174 个中文基础说话人、109 个英文基础说话人。中文每个说话人有低音、标准、高音三种机械配置（160 / 190 / 220 Hz），共 522 种配置；它们是音高变体，不是 522 个不同说话人。原始模型未提供可靠的性别元数据，页面标为“未标注”，请以试听选择。旧 Edge 音色 ID 会迁移到本地首选音色，已开启的自动会话分配继续使用不同音色。
 
-Chinese choices are grouped by Mandarin, Taiwan, Cantonese and regional accents. The currently verified catalog has 14 Chinese base voices and 42 mechanical pitch profiles. These are pitch variants, not 42 different speakers.
-
-Choose Chinese and English voices, preview, and save for Kimi, Codex, or both. The local page also previews both chimes. Keep the command running; Ctrl+C closes it. Voice previews use online TTS with fixed sample sentences.
+The offline catalog provides 174 Chinese speakers (522 pitch profiles) and 109 English speakers. Gender metadata is unspecified. Previews and narration use the same local engine and mechanical processing. Existing Edge voice preferences migrate to local defaults; select new voices on this page.
 
 默认启用自适应语速：根据中英文待播文字估算积压时长，积压增加时逐句加速，减少后恢复基础语速。默认追赶上限 `+100%`，可在音色设置页调整或关闭自动加速。修改对下一句生效，正在播放的句子保持原速；提示音不变速。试听使用基础语速，将基础语速暂时调到上限即可预览追赶效果。生成持续快于最高播放速度时仍会积压。
 
 Adaptive speech rate is enabled by default. Queued Chinese and English text increases the rate of subsequent utterances, up to `+100%`; draining the queue restores the base rate. The voice settings page lets you change the limit or disable adaptation. Current playback and chimes retain their speed. Sustained generation faster than maximum playback can still build a queue.
 
-连续播放不再添加句间等待；播放当前句时提前合成下一句，并裁掉机械音频首尾的多余静音，保留约 10 ms 边缘避免切掉发音。中英文和会话音色仍按原顺序播放；中断会取消预合成。网络合成未及时完成时仍可能短暂等待，句内自然停顿保留。
+连续播放不再添加句间等待；播放当前句时提前合成下一句，并裁掉机械音频首尾的多余静音，保留约 10 ms 边缘避免切掉发音。中英文和会话音色仍按原顺序播放；中断会取消预合成。本地合成未及时完成时仍可能短暂等待，句内自然停顿保留。
 
 Continuous playback adds no sentence delay. The next queued utterance is synthesized during playback, and excess leading/trailing silence is removed from mechanical audio. Ordering, per-session voices, and internal pauses are preserved. Slow synthesis can still cause a short gap.
 
 默认开启 **每个工作会话自动分配不同音色**：以原生 Hook 的 session ID 为 Agent 身份，中英文各自保留一个音色，多轮任务保持稳定。独立包装器进程也参与同一个音色分配表。所选音色是新会话的首选，已占用时分配其他音色；现有会话保留音色。关闭自动分配则固定使用手选音色。这里识别的是独立 CLI 会话；没有独立会话事件的内部子 Agent 无法单独识别。
 
-正常会话关闭且待播句子播放完毕后释放音色；异常退出留下的分配在 24 小时未使用后回收。可用音色数量有限，耗尽时保留文字并记录失败，不偷偷重复使用已占用音色。中文候选包含普通话、粤语、台湾及区域音色，自动分配可能改变口音。工作会话闲置超过 24 小时后恢复，可能重新分配。
+正常会话关闭且待播句子播放完毕后释放音色；异常退出留下的分配在 24 小时未使用后回收。可用音色数量有限，耗尽时保留文字并记录失败，不偷偷重复使用已占用音色。中文模型使用普通话语料，英文使用 VCTK 多说话人语料；可试听选择。工作会话闲置超过 24 小时后恢复，可能重新分配。
 
-人声默认使用本地固定音高重合成：标准配置男性 120 Hz、女性 190 Hz，统一音量峰值，不添加情感风格；试听与正式播放使用同一处理。中文开放全部基础音色，不再仅凭原始情绪标签排除，输出仍经过机械处理；英文继续过滤明显激情、活泼、可爱及 Expressive 等标签音色。默认首选新闻风格的 `zh-CN-YunyangNeural`、理性风格的 `en-US-EricNeural`，语速 `+0%`。处理会削弱中文声调，无法保证消除所有主观情绪感知。
+人声使用本地固定音高重合成，标准配置 190 Hz，统一音量峰值，不添加情感风格；试听与正式播放使用同一处理。默认中文 `local:zh:066`、英文 `local:en:000`，基础语速 `+0%`。处理会削弱中文声调，无法保证消除所有主观情绪感知。中文句子中的 FastAPI、Python 等英文术语转交本地英文模型朗读，避免被中文模型丢掉。
 
 任务结束等待输入时，播放完成叮咚；调用 `request_user_input` / AskUser 类工具、请求审批，或最终可见文字明确提出问题时，播放另一种叮咚。完成提示排在执行旁白后，同一回合不会被重复 Stop 事件重播。问题识别只读取可见文字，不播报最终答案。没有问号的隐含疑问不保证识别。
 
@@ -134,10 +133,10 @@ Continuous playback adds no sentence delay. The next queued utterance is synthes
 | 参数 | 含义 / Meaning | 默认值 |
 |---|---|---|
 | `--language` | `auto`、`zh`、`en`；跟随内容或指定旁白语言 | `auto` |
-| `--voice-zh` | 中文音色 / Chinese voice | `zh-CN-YunyangNeural` |
-| `--voice-en` | 英文音色 / English voice | `en-US-EricNeural` |
+| `--voice-zh` | 中文音色 / Chinese voice | `local:zh:066` |
+| `--voice-en` | 英文音色 / English voice | `local:en:000` |
 | `--rate` | 带正负号的语速百分比；负值写成 `--rate=-10%` | `+0%` |
-| `--text-only` | 禁用音频和在线 TTS 请求 / Text only | 关闭 |
+| `--text-only` | 禁用音频和本地 TTS 合成 / Text only | 关闭 |
 | `--cwd` | CLI 的工作目录（仅 `run`） | 当前目录 |
 | `--executable` | CLI 可执行文件路径（仅 `run`） | 从 PATH 查找 |
 | `--prompt` | 任务提示词；`run` 必填，`replay` 用于初始语言判断 | — |
@@ -160,7 +159,7 @@ Visible Kimi think blocks and Codex public reasoning summaries are narrated in b
 - 丢弃代码块、缩进代码、diff、堆栈、常见日志行、工具输出和最后一条最终回答。Codex 的 `encrypted_content`、`raw_content`、`reasoning_text` 及 raw reasoning 事件不进入播报。不会解码或获取模型的私有推理。
 - Kimi 和旧版 Codex 事件没有明确的最终回答标记时，将未分类的消息暂存，后续工具活动证明它是中间进度后才提取；末尾暂存消息丢弃。这可能略微延迟旁白。
 - 实际助手说明按句分段，长句分成最多 90 字或 40 词的播放段，不直接截掉后半段。说明按原文去重；包装器的工具模板仍按动作和语言 30 秒去重。
-- 包装器同样优先保留实际说明，保留当前句、最多 6 条普通提示与 256 段实际文字，语音开始间隔至少 1 秒；完成提示排在执行旁白之后。
+- 包装器同样优先保留实际说明，保留当前句、最多 6 条普通提示与 256 段实际文字，不添加句间等待；完成提示排在执行旁白之后。
 
 工具模板覆盖读取、搜索、修改、测试、执行命令和通用工具；命令按可执行程序及参数白名单分类，`echo "pytest"` 不会被误判成运行测试。
 
@@ -170,13 +169,15 @@ Kimi 使用 `--prompt --output-format stream-json`；此模式按 Kimi 自身规
 
 包装器复用 CLI 自己的登录配置，不读取或复制凭据。CLI 自身可能在用户目录写入会话数据。当前 Codex 文档要求 Git 工作目录，本项目的 Git 元数据目录已存在；其他目录请遵守 Codex 的目录检查。
 
-Edge TTS 是在线服务，**只发送过滤后的公开 think、摘要及旁白文字**，因此直接采用的进度句仍可能含项目名称。`--text-only` 完全关闭 TTS；不要把它误当成不执行 CLI 的 dry-run。
+正式播报、音色列表和试听均使用本地模型，不需要联网，也不自动回退到在线 TTS。首次安装通过 `tts install` 从官方地址下载中文约 32 MB、英文约 80 MB 的模型包并校验 SHA-256；模型保存在 `%LOCALAPPDATA%\SoundOfVibe\models`，可用 `SOUND_OF_VIBE_MODEL_DIR` 指定模型根目录。`tts status` 查看就绪状态。CLI 本身调用 Kimi / Codex 模型仍按其原有方式联网。
 
-网络合成超时为 10 秒，最多重试一次；音色验证或音频设备初始化失败时降级为文字。合成失败不会阻塞 CLI 输出。正常退出保留 CLI 退出码；包装器启动错误返回 2，Ctrl+C 返回 130，并停止播放、终止其启动的进程树、清理临时音频。
+本地推理通过 sherpa-onnx 使用 CPU 两线程。中文使用 [icefall AISHELL3 VITS](https://k2-fsa.github.io/sherpa/onnx/tts/pretrained_models/vits.html#aishell3-chinese-multi-speaker-174-speakers)，英文使用 [Piper VCTK](https://k2-fsa.github.io/sherpa/onnx/tts/all/English/vits-piper-en_GB-vctk-medium.html)。模型缺失时请运行 `tts install`；初始化或合成失败保留文字，不影响 CLI。模型首载会增加约 2 秒延迟（取决于机器），之后驻留复用；播放时预合成下一句。
 
-## 不调用模型的演示 / Offline agent replay
+正常退出保留 CLI 退出码；包装器启动错误返回 2，Ctrl+C 返回 130，并停止播放、终止其启动的进程树、取消预合成和清理临时音频。`--text-only` 关闭音频，不会关闭 CLI 任务执行。
 
-以下命令不启动 CLI、不调用模型、不执行工具，使用仓库中的合成事件示例：
+## 不调用 Agent 模型的演示 / Offline agent replay
+
+以下命令不启动 CLI、不调用 Agent 模型、不执行工具，使用仓库中的合成事件示例：
 
 ```powershell
 .\.venv\Scripts\sound-of-vibe.exe replay kimi --file examples/kimi-bilingual.jsonl --text-only
@@ -184,10 +185,10 @@ Edge TTS 是在线服务，**只发送过滤后的公开 think、摘要及旁白
 .\.venv\Scripts\sound-of-vibe.exe replay codex --file examples/codex-bilingual.jsonl --text-only --failed
 ```
 
-`replay` 去掉 `--text-only` 即启用在线 TTS。示例事件瞬间到达时，超过队列上限的较旧更新会合并；要逐一确认两个音色的合成和播放，可运行：
+`replay` 去掉 `--text-only` 即启用本地 TTS。示例事件瞬间到达时，超过队列上限的较旧更新会合并；要逐一确认两个音色的合成和播放，可运行：
 
 ```powershell
-.\.venv\Scripts\python.exe tools/smoke_audio.py
+.\.venv\Scripts\python.exe tools/smoke_local_tts.py --play
 ```
 
 ## 验证 / Tests
@@ -197,7 +198,7 @@ Edge TTS 是在线服务，**只发送过滤后的公开 think、摘要及旁白
 .\.venv\Scripts\python.exe -m pip check
 ```
 
-测试不调用模型或网络 TTS，覆盖双语识别、语言切换、噪声过滤、最终回答排除、JSONL 分块、语音队列、合成超时及清理、子进程日志排空、退出码和取消。实际双语合成与播放另由 `tools/smoke_audio.py` 验证。
+测试不调用模型或网络 TTS，覆盖双语识别、语言切换、噪声过滤、最终回答排除、JSONL 分块、语音队列、合成超时及清理、子进程日志排空、退出码和取消。实际双语合成与播放另由 `tools/smoke_local_tts.py --play` 验证。
 
 Windows 使用 Job Object 管理本次启动的进程树，避免依赖全系统进程枚举；取消和正常结束都会清理本次启动的后代进程，防止继承输出管道的后台进程阻止退出。
 
@@ -239,3 +240,7 @@ Windows 使用 Job Object 管理本次启动的进程树，避免依赖全系统
 - [Kimi Code Hooks](https://moonshotai.github.io/kimi-code/en/customization/hooks)
 - [edge-tts](https://github.com/rany2/edge-tts)
 - [pygame music playback](https://www.pygame.org/docs/ref/music.html)
+
+2026-10-05 本地 TTS 验证：101 项自动化测试通过。禁止 Python 网络连接时，中英文试听、混合英文标识符、独立会话音色和完成叮咚实际播放成功。包含机械处理的固定示例合成耗时 0.10–0.26 秒，模型冷加载 1.9 秒（Ryzen 7 8845H）；以上速度为此机器实测，非所有设备保证。前述在线音色和在线合成记录属于迁移前的历史验证。
+
+迁移后的原生裸 Codex 联调通过：同一会话中英文实际说明正常播放，明确提问播放提问叮咚，CLI 正常退出。本地设置页中文和英文试听也已通过浏览器验证。Kimi 使用同一本地后台实现，已更新全局配置；本轮未重跑 Kimi 原生模型联调。

@@ -23,7 +23,8 @@ from .models import Event, Narration
 from .kimi_transcript import WireTail, find_wire
 from .codex_transcript import RolloutTail, find_rollout
 from .rules import Narrator, classify_tool, detect_language
-from .speech import DEFAULT_VOICES, EdgeSpeech, Speaker
+from .speech import Speaker
+from .local_tts import LOCAL_VOICES, LocalSpeech, local_voices
 from .voice_assignment import VoiceAssignments
 
 HOOK_EVENTS = ("SessionStart", "TurnStarted", "PreToolUse", "PostToolUse", "PostToolUseFailure",
@@ -58,7 +59,7 @@ def state_directory() -> Path:
 
 
 def load_settings(directory: Path) -> dict:
-    defaults = {"enabled": True, "language": "auto", "voices": DEFAULT_VOICES, "rate": "+0%", "per_session_voice": True,
+    defaults = {"enabled": True, "language": "auto", "voices": LOCAL_VOICES, "rate": "+0%", "per_session_voice": True,
                 "adaptive_rate": True, "max_rate": 100}
     path = directory / "settings.json"
     if path.exists():
@@ -201,7 +202,7 @@ def receive(directory: Path, stream=None) -> int:
     return 0
 
 
-class LoggedSpeech(EdgeSpeech):
+class LoggedSpeech(LocalSpeech):
     def __init__(self, directory: Path, settings: dict):
         super().__init__(settings["voices"], settings["rate"])
         self.directory = directory
@@ -212,7 +213,7 @@ class LoggedSpeech(EdgeSpeech):
 
     def voice_for(self, narration):
         self.settings = load_settings(self.directory)
-        self.voices = self.settings["voices"]
+        self.voices = local_voices(self.settings["voices"])
         self.rate = self.settings["rate"]
         self.adaptive_rate = self.settings["adaptive_rate"]
         self.max_rate = self.settings["max_rate"]
@@ -405,6 +406,10 @@ async def worker(directory: Path, token: str, idle_seconds: float = IDLE_SECONDS
             narrator.poll_text()
             narrator.tick()
             limit = settings.get("active_idle_seconds", idle_seconds) if narrator.active else idle_seconds
+            if backend is not None and idle_seconds == IDLE_SECONDS:
+                # Keep local models resident between nearby turns to avoid cold
+                # loading on each new task. Explicit/test idle limits still apply.
+                limit = max(limit, 600)
             if not events and time.monotonic() - last_event > limit:
                 # Audio is normally already finished before the idle timeout.
                 break
