@@ -97,7 +97,7 @@ class TrayApp:
         status = self.controller.status()
         enabled = any(value['enabled'] for value in status.values())
         preferences = self.preferences()
-        self.icon.title = f"Sound of Vibe · {'运行 / Running' if enabled else '停止 / Stopped'} · {preferences['rate']} · {preferences['volume']}%"
+        self.icon.title = f"声音旁白 · {'运行' if enabled else '停止'} · {preferences['rate']} · {preferences['volume']}%"
         self.icon.icon = icon_image(enabled, preferences['muted'])
         self.icon.update_menu()
 
@@ -108,7 +108,7 @@ class TrayApp:
                 if not self.done.is_set():
                     self.refresh()
             except Exception as error:
-                self.icon.notify(str(error), 'Sound of Vibe')
+                self.icon.notify(str(error), '声音旁白')
         return invoke
 
     def menu(self):
@@ -121,17 +121,17 @@ class TrayApp:
             return item(f'{volume}%', self.action(lambda: self.controller.patch({'volume': volume})),
                         checked=lambda _: self.preferences()['volume'] == volume, radio=True)
         return pystray.Menu(
-            item('控制面板 / Control panel', self.action(lambda: webbrowser.open(self.url)), default=True),
-            item('启动播报服务 / Start narration', self.action(lambda: self.controller.set_enabled(True))),
-            item('停止播报服务 / Stop narration', self.action(lambda: self.controller.set_enabled(False))),
-            item('静音 / Mute', self.action(lambda: self.controller.patch({'muted': not self.preferences()['muted']})),
+            item('控制面板', self.action(lambda: webbrowser.open(self.url)), default=True),
+            item('启动播报服务', self.action(lambda: self.controller.set_enabled(True))),
+            item('停止播报服务', self.action(lambda: self.controller.set_enabled(False))),
+            item('静音', self.action(lambda: self.controller.patch({'muted': not self.preferences()['muted']})),
                  checked=lambda _: self.preferences()['muted']),
-            item('语速 / Speech rate', pystray.Menu(*(rate_item(rate) for rate in (-50, -25, 0, 25, 50, 75, 100)))),
-            item('音量 / Volume', pystray.Menu(*(volume_item(volume) for volume in (0, 25, 50, 75, 100)))),
-            item('登录时启动 / Run at sign-in', self.action(lambda: set_startup(not startup_enabled())), checked=lambda _: startup_enabled()),
-            item('查看日志 / Open logs', self.action(lambda: os.startfile(str(self.root)))),
+            item('语速', pystray.Menu(*(rate_item(rate) for rate in (-50, -25, 0, 25, 50, 75, 100)))),
+            item('音量', pystray.Menu(*(volume_item(volume) for volume in (0, 25, 50, 75, 100)))),
+            item('登录时启动', self.action(lambda: set_startup(not startup_enabled())), checked=lambda _: startup_enabled()),
+            item('查看日志', self.action(lambda: os.startfile(str(self.root)))),
             pystray.Menu.SEPARATOR,
-            item('退出并停止播报 / Exit and stop narration', self.action(self.shutdown)))
+            item('退出并停止播报', self.action(self.shutdown)))
 
     def shutdown(self):
         if self.done.is_set():
@@ -145,7 +145,7 @@ class TrayApp:
         import pystray
         server_thread = Thread(target=self.server.serve_forever, daemon=True)
         server_thread.start()
-        self.icon = pystray.Icon('SoundOfVibe', icon_image(), 'Sound of Vibe', self.menu())
+        self.icon = pystray.Icon('SoundOfVibe', icon_image(), '声音旁白', self.menu())
         def setup(icon):
             icon.visible = True
             self.refresh()
@@ -166,18 +166,18 @@ class TrayApp:
 
 def launch():
     if os.name != 'nt':
-        raise ValueError('The tray application requires Windows')
+        raise ValueError('托盘程序仅支持 Windows')
     root = state_directory()
     root.mkdir(parents=True, exist_ok=True)
     with (root / 'tray.log').open('ab') as log:
         subprocess.Popen(tray_command(), stdin=subprocess.DEVNULL, stdout=log, stderr=log,
                          creationflags=subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP)
-    print('Sound of Vibe 已在 Windows 托盘启动 / Started in the Windows tray')
+    print('声音旁白已在 Windows 托盘启动')
 
 
 def main():
     if os.name != 'nt':
-        raise ValueError('The tray application requires Windows')
+        raise ValueError('托盘程序仅支持 Windows')
     instance = SingleInstance(state_directory())
     try:
         if not instance.acquired:

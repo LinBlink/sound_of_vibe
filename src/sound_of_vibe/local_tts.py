@@ -36,15 +36,15 @@ def local_catalog():
     for language, model in MODELS.items():
         for sid in range(model["speakers"]):
             base = f"local:{language}:{sid:03d}"
-            variants = [("", "标准 / Standard", 1.0)]
+            variants = [("", "标准", 1.0)]
             if language == "zh":
-                variants += [("::low", "低音 / Low", .9), ("::high", "高音 / High", 1.1)]
+                variants += [("::low", "低音", .9), ("::high", "高音", 1.1)]
             for suffix, label, scale in variants:
                 entries.append({"ShortName": base + suffix, "BaseVoice": base,
                             "Locale": "zh-CN" if language == "zh" else "en-GB",
                             "Gender": "Unknown", "SpeakerId": sid,
                             "NativeLanguage": language, "PitchHz": None, "PitchScale": scale,
-                            "DisplayName": f"{base} · {label} ({scale:.0%} 原音高 / native pitch)"})
+                            "DisplayName": f"{base} · {label} ({scale:.0%} 原音高)"})
     return entries
 
 

@@ -20,7 +20,7 @@ class ServiceController:
 
     def directories(self, source='both'):
         if source not in {'both', 'kimi', 'codex'}:
-            raise ValueError('Invalid source')
+            raise ValueError('请选择 Kimi、Codex 或两者')
         return [(name, self.root / 'Codex' if name == 'codex' else self.root)
                 for name in ('kimi', 'codex') if source == 'both' or source == name]
 
@@ -46,17 +46,17 @@ class ServiceController:
         source = data.get('source', 'both')
         values = {key: value for key, value in data.items() if key != 'source'}
         if not values or values.keys() - {'rate', 'max_rate', 'adaptive_rate', 'volume', 'muted'}:
-            raise ValueError('Invalid live controls')
+            raise ValueError('实时控制设置无效')
         for key in ('adaptive_rate', 'muted'):
             if key in values and type(values[key]) is not bool:
-                raise ValueError(f'Invalid {key}')
+                raise ValueError('开关设置须为开启或关闭')
         for key in ('volume', 'max_rate'):
             minimum = 0 if key == 'volume' else -50
             if key in values and (type(values[key]) is not int or not minimum <= values[key] <= 100):
-                raise ValueError(f'{key} must be an integer from {minimum} to 100')
+                raise ValueError(f'数值须为 {minimum} 至 100 之间的整数')
         if 'rate' in values and (not isinstance(values['rate'], str) or
                 not re.fullmatch(r'[+-]\d{1,3}%', values['rate']) or not -50 <= int(values['rate'][:-1]) <= 100):
-            raise ValueError('Rate must be between -50% and +100%')
+            raise ValueError('语速范围为 -50% 至 +100%')
         with SETTINGS_LOCK:
             updates = []
             for _, directory in self.directories(source):
@@ -72,7 +72,7 @@ class ServiceController:
 
     def set_enabled(self, enabled, source='both'):
         if type(enabled) is not bool:
-            raise ValueError('Invalid service state')
+            raise ValueError('服务状态无效')
         changed = []
         with SETTINGS_LOCK:
             for _, directory in self.directories(source):
@@ -90,7 +90,7 @@ class ServiceController:
                         connection.execute('DELETE FROM lease')
                 changed.append(directory)
         if enabled and not changed:
-            raise ValueError('Install CLI hooks first: sound-of-vibe hooks install')
+            raise ValueError('请先安装 CLI 挂钩：sound-of-vibe hooks install')
         if enabled:
             for directory in changed:
                 queue = HookQueue(directory)

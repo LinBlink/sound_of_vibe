@@ -25,17 +25,17 @@ def validate(data, voices):
     selected = data.get("voices", {})
     for language in ("zh", "en"):
         if selected.get(language) not in names or not names[selected[language]]["Locale"].startswith(language + "-"):
-            raise ValueError("请选择有效的中英文音色 / Select valid Chinese and English voices")
+            raise ValueError("请选择有效的中英文音色")
     rate = data.get("rate", "+0%")
     if not isinstance(rate, str) or not re.fullmatch(r"[+-]\d{1,3}%", rate) or not -50 <= int(rate[:-1]) <= 100:
-        raise ValueError("语速范围 -50% 至 +100% / Rate range: -50% to +100%")
+        raise ValueError("语速范围 -50% 至 +100%")
     if not isinstance(data.get("per_session_voice", True), bool):
-        raise ValueError("Invalid automatic voice setting")
+        raise ValueError("自动音色设置无效")
     if not isinstance(data.get("adaptive_rate", True), bool):
-        raise ValueError("Invalid adaptive rate setting")
+        raise ValueError("自适应语速设置无效")
     maximum = data.get("max_rate", 100)
     if type(maximum) is not int or not int(rate[:-1]) <= maximum <= 100:
-        raise ValueError("追赶上限须在基础语速至 +100% / Catch-up limit must be between base rate and +100%")
+        raise ValueError("追赶上限须在基础语速至 +100%")
     return selected, rate
 
 
@@ -43,7 +43,7 @@ def save_settings(root, data, voices):
     selected, rate = validate(data, voices)
     source = data.get("source", "both")
     if source not in {"kimi", "codex", "both"}:
-        raise ValueError("Invalid source")
+        raise ValueError("请选择 Kimi、Codex 或两者")
     for name in (("kimi", "codex") if source == "both" else (source,)):
         directory = root / "Codex" if name == "codex" else root
         path = directory / "settings.json"
@@ -58,7 +58,7 @@ def save_settings(root, data, voices):
 async def preview(voice, rate, voices):
     entry = next((v for v in voices if v["ShortName"] == voice), None)
     if entry is None:
-        raise ValueError("Invalid voice")
+        raise ValueError("请选择有效的音色")
     text = "文件修改已完成。测试全部通过。接下来检查执行结果。" if entry["Locale"].startswith("zh-") else "The file update is complete. All tests passed. Next, I will check the results."
     engine = await asyncio.to_thread(local_engine)
     return await asyncio.to_thread(engine.synthesize, text, entry["SpeakerId"],
@@ -92,7 +92,7 @@ def create_server(root=None, voices=None, controller=None, on_exit=None):
 
         def do_GET(self):
             if not self.allowed():
-                return self.reply({"error": "Invalid host"}, status=403)
+                return self.reply({"error": "访问地址无效"}, status=403)
             if self.path == "/":
                 html = (Path(__file__).parent / "assets" / "voices.html").read_text(encoding="utf-8")
                 return self.reply(html.replace("__TOKEN__", token).encode(), "text/html; charset=utf-8")
@@ -107,19 +107,19 @@ def create_server(root=None, voices=None, controller=None, on_exit=None):
                 return self.reply({"sources": controller.status()})
             if self.path in {"/sounds/complete", "/sounds/ask"}:
                 return self.reply((Path(__file__).parent / "assets" / (self.path.rsplit("/", 1)[1] + ".ogg")).read_bytes(), "audio/ogg")
-            self.reply({"error": "Not found"}, status=404)
+            self.reply({"error": "未找到页面或接口"}, status=404)
 
         def do_POST(self):
             origin = f"http://127.0.0.1:{self.server.server_port}"
             if not self.allowed() or self.headers.get("X-Voice-Token") != token or self.headers.get("Origin", origin) != origin:
-                return self.reply({"error": "Invalid request"}, status=403)
+                return self.reply({"error": "请求无效"}, status=403)
             try:
                 length = int(self.headers.get("Content-Length", "0"))
                 if not 0 < length <= 8192:
-                    raise ValueError("Invalid request size")
+                    raise ValueError("请求内容大小无效")
                 data = json.loads(self.rfile.read(length))
                 if not isinstance(data, dict):
-                    raise ValueError("Invalid request")
+                    raise ValueError("请求无效")
                 if self.path == "/api/save":
                     save_settings(root, data, voices)
                     return self.reply({"saved": True})
@@ -134,11 +134,11 @@ def create_server(root=None, voices=None, controller=None, on_exit=None):
                 if self.path == "/api/preview":
                     _, rate = validate(data, voices)
                     return self.reply(asyncio.run(preview(data.get("voice"), rate, voices)), "audio/wav")
-                self.reply({"error": "Not found"}, status=404)
+                self.reply({"error": "未找到页面或接口"}, status=404)
             except (ValueError, TypeError) as error:
                 self.reply({"error": str(error)}, status=400)
             except Exception as error:
-                self.reply({"error": "请求失败 / Request failed: " + type(error).__name__}, status=503)
+                self.reply({"error": "请求失败，请检查本地模型和播报设置"}, status=503)
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     server.daemon_threads = True
@@ -148,8 +148,8 @@ def create_server(root=None, voices=None, controller=None, on_exit=None):
 def open_picker(no_browser=False):
     server = create_server()
     url = f"http://127.0.0.1:{server.server_port}/"
-    print("音色选择 / Voice settings: " + url, flush=True)
-    print("按 Ctrl+C 关闭设置页服务 / Ctrl+C stops the settings server", flush=True)
+    print("音色选择：" + url, flush=True)
+    print("按 Ctrl+C 关闭设置页服务", flush=True)
     if not no_browser:
         webbrowser.open(url)
     try:

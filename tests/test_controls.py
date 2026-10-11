@@ -96,8 +96,8 @@ class ControlTests(unittest.IsolatedAsyncioTestCase):
                 app = TrayApp(root)
                 try:
                     labels = [item.text for item in app.menu().items]
-                    self.assertIn('停止播报服务 / Stop narration', labels)
-                    self.assertIn('音量 / Volume', labels)
+                    self.assertIn('停止播报服务', labels)
+                    self.assertIn('音量', labels)
                 finally:
                     app.server.server_close()
             finally:
